@@ -90,6 +90,34 @@
     if (!notion.configured()) throw new Error("Notion is not set up: Powertoys panel (Ctrl+Alt+P), Settings");
   };
 
+  /** Claude picks where in Notion a new page belongs, among the pages and databases shared with the connection. */
+  async function choosePlace({ kind, title, about }) {
+    const places = await notion.places();
+    if (!places.length) throw new Error("Notion: the connection can't see any pages; share the pages it may use with it");
+    if (places.length === 1) return places[0];
+    const list = places.map((place, i) => `${i}. [${place.type}] ${place.path}`).join("\n");
+    const answer = await ai.ask({
+      fast: true,
+      json: true,
+      prompt:
+        `A new Notion page is being created: a ${kind} titled "${title}". About it: ${about.slice(0, 1500)}\n\n` +
+        "Where in this Notion workspace does it belong? Prefer a database or page meant for this kind of page (a Postmortems or " +
+        "Incidents database for a postmortem, Meeting notes for a huddle, the project's page for a project discussion) over a " +
+        'generic one. Answer as JSON: {"index": number, "why": string}.\n\n' + list.slice(0, 60000),
+    });
+    const place = places[answer.index];
+    if (!place) throw new Error(`Claude didn't pick a place in Notion (${JSON.stringify(answer).slice(0, 200)})`);
+    log(`notion: a ${kind} goes under "${place.path}" (${answer.why ?? ""})`);
+    return place;
+  }
+
+  /** A new page wherever Claude says it belongs -> { url, place: the parent's path }. */
+  async function newNotionPage({ kind, title, about, children }) {
+    const place = await choosePlace({ kind, title, about });
+    const created = await notion.createPage({ parentId: place.id, title, children });
+    return { ...created, place: place.path };
+  }
+
   async function threadToNotion({ link }) {
     needNotion();
     const thread = await claude.readThread({ link, limit: 200 });
@@ -116,7 +144,7 @@
       b.divider(),
       b.toggle("Conversation", text.split("\n").filter(Boolean).slice(0, 95).map((line) => b.paragraph(line))),
     ];
-    const created = await notion.createPage({ title: summary.title || `Slack: ${thread.conversation}`, children });
+    const created = await newNotionPage({ kind: `Slack ${kind} summary`, title: summary.title || `Slack: ${thread.conversation}`, about: `From #${thread.conversation}. ${summary.summary ?? ""}`, children });
     log(`saved a ${kind} to Notion`);
     return created;
   }
@@ -133,8 +161,10 @@
         threadAsText(thread).slice(0, 150000),
     });
     const b = notion.blocks;
-    const created = await notion.createPage({
+    const created = await newNotionPage({
+      kind: "incident postmortem",
       title: report.title || `Postmortem: ${thread.conversation}`,
+      about: `Incident channel #${thread.conversation}. ${report.summary ?? ""}`,
       children: [
         b.link(`Incident channel: ${thread.conversation}`, link),
         b.heading("Summary"),
@@ -170,7 +200,7 @@
     if (deliver) {
       const { to } = settingsOf("digest", { to: "dm" });
       if (to === "notion" && notion.configured()) {
-        const created = await notion.createPage({ title: `Slack digest ${new Date().toISOString().slice(0, 10)}`, children: answer.split("\n").filter(Boolean).map((line) => notion.blocks.paragraph(line)) });
+        const created = await newNotionPage({ kind: "daily Slack digest", title: `Slack digest ${new Date().toISOString().slice(0, 10)}`, about: answer, children: answer.split("\n").filter(Boolean).map((line) => notion.blocks.paragraph(line)) });
         return { text: answer, url: created.url };
       }
       await postToSelf(await teamOf(null), `*Catch-up digest*\n${answer}`);
@@ -473,7 +503,6 @@
     "notion-sign-in": notionSignIn,
     settings: () => ({
       notion: notion.configured(),
-      notionParentPage: notion.settings().parentPage || null,
       notionClientId: notion.settings().clientId || null,
       notionRedirectUri: notion.redirectUri,
       incidentPattern: settingsOf("incidents", { channelPattern: "^(inc|incident)[-_]" }).channelPattern,
@@ -481,27 +510,25 @@
     }),
   };
 
-  /** Saves Notion's token and parent page, only once Notion has accepted both. A blank token keeps the saved one. */
-  async function notionSetup({ token, parentPage }) {
+  /** Saves Notion's token, only once Notion has accepted it. A blank token keeps the saved one. */
+  async function notionSetup({ token }) {
     token = token?.trim() || notion.settings().token;
     if (!token) throw new Error("Paste the integration's secret first");
-    parentPage = parentPage?.trim() ?? "";
-    const checked = await notion.check({ token, parentPage });
-    updateSettings((current) => ({ ...current, notion: { ...current.notion, token, parentPage } }));
-    log(`Notion set up (workspace ${checked.workspace ?? "?"}, parent page "${checked.parentTitle}")`);
+    const checked = await notion.check({ token });
+    updateSettings((current) => ({ ...current, notion: { ...current.notion, token } }));
+    log(`Notion set up (workspace ${checked.workspace ?? "?"}, ${checked.shared} pages shared)`);
     return checked;
   }
 
-  /** Signs in with a public (OAuth) connection; saves the token only once the parent page checks out. A blank secret keeps the saved one. */
-  async function notionSignIn({ clientId, clientSecret, parentPage }) {
+  /** Signs in with a public (OAuth) connection; saves the token only once it checks out. A blank secret keeps the saved one. */
+  async function notionSignIn({ clientId, clientSecret }) {
     clientId = clientId?.trim() || notion.settings().clientId;
     clientSecret = clientSecret?.trim() || notion.settings().clientSecret;
     if (!clientId || !clientSecret) throw new Error("Paste the connection's client ID and client secret first");
-    parentPage = parentPage?.trim() ?? "";
     const { token, refreshToken, workspace } = await notion.signIn({ clientId, clientSecret });
-    const checked = await notion.check({ token, parentPage });
-    updateSettings((current) => ({ ...current, notion: { ...current.notion, token, refreshToken, clientId, clientSecret, parentPage } }));
-    log(`Notion signed in (workspace ${workspace ?? "?"}, parent page "${checked.parentTitle}")`);
+    const checked = await notion.check({ token });
+    updateSettings((current) => ({ ...current, notion: { ...current.notion, token, refreshToken, clientId, clientSecret } }));
+    log(`Notion signed in (workspace ${workspace ?? "?"}, ${checked.shared} pages shared)`);
     return { ...checked, workspace: workspace ?? checked.workspace };
   }
 

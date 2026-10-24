@@ -89,7 +89,7 @@
         page.notice("Summarizing for Notion…");
         try {
           const created = await page.invoke("thread-to-notion", { link });
-          page.notice("Saved to Notion.", { label: "Open", run: () => window.open(created.url) });
+          page.notice(`Saved to Notion, under ${created.place}.`, { label: "Open", run: () => window.open(created.url) });
         } catch (caught) {
           page.notice(`Couldn't save to Notion: ${page.reason(caught)}`);
         }
@@ -114,7 +114,7 @@
         try {
           const channelLink = link.replace(/\/p\d+.*$/, "");
           const created = await page.invoke("postmortem", { link: channelLink });
-          page.notice("Postmortem drafted in Notion.", { label: "Open", run: () => window.open(created.url) });
+          page.notice(`Postmortem drafted in Notion, under ${created.place}.`, { label: "Open", run: () => window.open(created.url) });
         } catch (caught) {
           page.notice(`Couldn't draft the postmortem: ${page.reason(caught)}`);
         }

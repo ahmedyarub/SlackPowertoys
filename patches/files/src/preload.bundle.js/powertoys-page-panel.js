@@ -6,7 +6,7 @@
 //   Search   Slack, Notion and your repositories at once
 //   Focus    do not disturb for a while; Claude lets urgent mentions through; a summary when it ends
 //   Digest   what is unread, summarized by Claude
-//   Settings Notion: sign in (OAuth connection) or an internal integration's secret, and the page new pages go under
+//   Settings Notion: sign in (OAuth connection) or an internal integration's secret
 // Also: a Claude Code session's permission request (with "agents.remoteApprove" on) shows as Allow / Deny here.
 // ---------------------------------------------------------------------------------------------
 (function (module, exports, __webpack_require__) {
@@ -184,15 +184,14 @@
     };
     const steps = (text) => Object.assign(el("div", "sub", text), { style: "white-space: pre-line" });
     const status = el("div", "sub", current.notion ? "Notion is set up." : "");
-    const parent = input("Link to the Notion page new pages go under", current.notionParentPage ?? "");
     const saved = "Saved (paste a new one to replace it)";
     const run = async (button, channel, request, clear) => {
       button.disabled = true;
       status.textContent = channel === "notion-sign-in" ? "Finish signing in in your browser…" : "Checking with Notion…";
       try {
-        const checked = await page.invoke(channel, { ...request(), parentPage: parent.value });
+        const checked = await page.invoke(channel, request());
         for (const node of clear) Object.assign(node, { value: "", placeholder: saved });
-        status.textContent = `Saved: ${checked.workspace ? `workspace ${checked.workspace}, ` : ""}new pages go under "${checked.parentTitle}".`;
+        status.textContent = `Saved: ${checked.workspace ? `workspace ${checked.workspace}, ` : ""}${checked.shared} pages and databases shared. Claude picks where each new page goes.`;
       } catch (caught) {
         status.textContent = `Not saved: ${page.reason(caught)}`;
       } finally {
@@ -210,15 +209,13 @@
     save.addEventListener("click", () => run(save, "notion-setup", () => ({ token: token.value }), [token]));
 
     body.append(
-      el("div", "group", "Notion"),
-      parent,
-      el("div", "group", "Sign in (OAuth connection)"),
-      steps(`notion.so/profile/integrations → New connection → OAuth, redirect URI ${current.notionRedirectUri ?? ""} → copy its client ID and secret. When Notion asks, share the page above (and any others).`),
+      el("div", "group", "Notion: sign in (OAuth connection)"),
+      steps(`notion.so/profile/integrations → New connection → OAuth, redirect URI ${current.notionRedirectUri ?? ""} → copy its client ID and secret. When Notion asks, pick the pages Powertoys may use; Claude puts each new page where it fits among them.`),
       clientId,
       clientSecret,
       signIn,
       el("div", "group", "Or an internal integration"),
-      steps("If you may create internal connections: copy its secret, and on the page above, ••• → Connections → add it."),
+      steps("If you may create internal connections: copy its secret, and on each page it may use, ••• → Connections → add it."),
       token,
       save,
       status,

@@ -50,6 +50,11 @@
         padding: 4px 10px; cursor: pointer; }
       .notice button.close { background: transparent; color: #d1d2d3; font-weight: 400; padding: 0 4px; }
     </style>`;
+    // Slack sends keys typed outside a text field to the message box; from outside the shadow root our fields don't
+    // look like text fields, so their keys stop here.
+    for (const type of ["keydown", "keypress", "keyup"]) {
+      host.addEventListener(type, (event) => event.composedPath()[0]?.matches?.("input, textarea, select") && event.stopPropagation());
+    }
     document.body.appendChild(host);
     return host.shadowRoot;
   }

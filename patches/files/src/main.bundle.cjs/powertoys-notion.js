@@ -1,8 +1,9 @@
 // ---------------------------------------------------------------------------------------------
 // Powertoys (local addition): Notion, through its API with your integration's token.
-// Settings (settings.json): "notion": { "token": "<secret from notion.so/my-integrations>", "parentPage": "<page link or
-// id where new pages go>", "previews": true }. Share the pages you want with the integration in Notion.
-// Or sign in with a public (OAuth) connection: "clientId", "clientSecret", and the token it gives ("refreshToken" too).
+// Settings (settings.json): "notion": { "token": "<an internal integration's secret>", "previews": true }, set in the
+// Powertoys panel's Settings tab; or a public (OAuth) connection's "clientId", "clientSecret" and the token its sign-in
+// gives ("refreshToken" too). Powertoys sees only the pages shared with the connection; where a new page goes is chosen
+// among them (powertoys/assist asks Claude).
 // ---------------------------------------------------------------------------------------------
 (function (module, exports, __webpack_require__) {
   "use strict";
@@ -13,7 +14,7 @@
   const { log, warn, readSettings } = __webpack_require__("powertoys/main");
 
   const API = "https://api.notion.com/v1";
-  const settings = () => ({ token: "", parentPage: "", previews: true, ...readSettings().notion });
+  const settings = () => ({ token: "", previews: true, ...readSettings().notion });
   exports.settings = settings;
   exports.configured = () => Boolean(settings().token);
 
@@ -140,10 +141,27 @@
     divider: () => ({ object: "block", type: "divider", divider: {} }),
   };
 
-  /** A new page under settings.parentPage (a page, or a database: then a row) -> { id, url }. */
-  async function createPage({ title, children = [] }) {
-    const parentId = notionId(settings().parentPage);
-    if (!parentId) throw new Error("Notion: set the page new pages go under in the Powertoys panel (Ctrl+Alt+P), Settings");
+  /** The pages and databases a new page can go under -> [{ id, type, title, path }], path being "A / B / title". */
+  async function places(token = settings().token) {
+    const found = [];
+    let cursor;
+    do {
+      const result = await call("POST", "/search", { page_size: 100, ...(cursor ? { start_cursor: cursor } : {}) }, token);
+      found.push(...result.results.filter((each) => !each.archived && !each.in_trash));
+      cursor = result.has_more && found.length < 500 ? result.next_cursor : null;
+    } while (cursor);
+    const byId = new Map(found.map((each) => [each.id, each]));
+    const parentOf = (each) => byId.get(each.parent?.page_id ?? each.parent?.database_id);
+    const pathOf = (each, depth = 0) => {
+      const parent = depth < 6 && parentOf(each);
+      return parent ? `${pathOf(parent, depth + 1)} / ${titleOf(each)}` : titleOf(each);
+    };
+    return found.map((each) => ({ id: each.id, type: each.object, title: titleOf(each), path: pathOf(each) }));
+  }
+  exports.places = places;
+
+  /** A new page under parentId (a page, or a database: then a row) -> { id, url }. */
+  async function createPage({ parentId, title, children = [] }) {
     const parentObject = await object(parentId);
     let parent;
     let properties;
@@ -161,19 +179,12 @@
   }
   exports.createPage = createPage;
 
-  /** Checks a token and the page new pages go under, before they are saved -> { workspace, parentTitle }. */
-  async function check({ token, parentPage }) {
+  /** Checks a token before it is saved -> { workspace, shared: the number of pages and databases it can see }. */
+  async function check({ token }) {
     const bot = await call("GET", "/users/me", undefined, token);
-    const parentId = notionId(parentPage);
-    if (!parentId) throw new Error("Notion: that is not a link to a Notion page");
-    let parentObject;
-    try {
-      parentObject = await object(parentId, token);
-    } catch (caught) {
-      if (caught.status === 404) throw new Error("Notion: the integration can't see that page; on the page, ••• → Connections → add the integration");
-      throw caught;
-    }
-    return { workspace: bot.bot?.workspace_name ?? null, parentTitle: titleOf(parentObject) };
+    const shared = (await places(token)).length;
+    if (!shared) throw new Error("Notion: the connection can't see any pages yet; share the pages it may use with it");
+    return { workspace: bot.bot?.workspace_name ?? null, shared };
   }
   exports.check = check;
 
