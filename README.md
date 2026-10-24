@@ -71,7 +71,8 @@ patches/files/...           files that are entirely new (written for Powertoys),
   `minMinutes` (default 5), `status` (default false: also show "Claude Code: working on <folder>" as your Slack
   status while a session works), `workspace` (a workspace id for folders that are not linked).
 - **Developer features** (they use Claude through the Claude Code CLI, signed in as you, with a lean prompt; Notion
-  through an integration secret you paste in the Powertoys panel's Settings tab (Ctrl+Alt+P); GitHub through the `gh` CLI):
+  through the Powertoys panel's Settings tab (Ctrl+Alt+P): sign in with an OAuth connection whose redirect URI is
+  `http://localhost:47821/notion/callback`, or paste an internal integration's secret; GitHub through the `gh` CLI):
   - **Notion:** link previews (title, path, status, assignees, last edit, first lines); pasting a link pastes its
     title, linked (Notion, GitHub, or any page's title); **Save to Notion** in the message menu (a thread, huddle or
     clip, summarized with decisions and action items); **Draft a postmortem in Notion** in incident channels.

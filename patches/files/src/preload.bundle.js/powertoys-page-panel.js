@@ -6,7 +6,7 @@
 //   Search   Slack, Notion and your repositories at once
 //   Focus    do not disturb for a while; Claude lets urgent mentions through; a summary when it ends
 //   Digest   what is unread, summarized by Claude
-//   Settings Notion's integration secret and the page new pages go under
+//   Settings Notion: sign in (OAuth connection) or an internal integration's secret, and the page new pages go under
 // Also: a Claude Code session's permission request (with "agents.remoteApprove" on) shows as Allow / Deny here.
 // ---------------------------------------------------------------------------------------------
 (function (module, exports, __webpack_require__) {
@@ -172,42 +172,57 @@
     body.append(go, out);
   }
 
-  /** Notion: the integration's secret and the page new pages go under; saved only once Notion accepts them. */
+  /** Notion: sign in with a public (OAuth) connection, or an internal integration's secret; saved only once Notion accepts it. */
   async function renderSettings(body) {
     const current = await page.invoke("settings").catch(() => ({}));
-    const token = el("input");
-    token.type = "password";
-    token.autocomplete = "off";
-    token.placeholder = current.notion ? "Saved (paste a new secret to replace it)" : "Internal integration secret (ntn_…)";
-    const parent = el("input");
-    parent.placeholder = "Link to the Notion page new pages go under";
-    parent.value = current.notionParentPage ?? "";
-    const save = el("button", "act", "Check and save");
+    const input = (placeholder, value = "", secret = false) => {
+      const node = el("input");
+      node.placeholder = placeholder;
+      node.value = value;
+      if (secret) Object.assign(node, { type: "password", autocomplete: "off" });
+      return node;
+    };
+    const steps = (text) => Object.assign(el("div", "sub", text), { style: "white-space: pre-line" });
     const status = el("div", "sub", current.notion ? "Notion is set up." : "");
-    save.addEventListener("click", async () => {
-      save.disabled = true;
-      status.textContent = "Checking with Notion…";
+    const parent = input("Link to the Notion page new pages go under", current.notionParentPage ?? "");
+    const saved = "Saved (paste a new one to replace it)";
+    const run = async (button, channel, request, clear) => {
+      button.disabled = true;
+      status.textContent = channel === "notion-sign-in" ? "Finish signing in in your browser…" : "Checking with Notion…";
       try {
-        const checked = await page.invoke("notion-setup", { token: token.value, parentPage: parent.value });
-        token.value = "";
-        token.placeholder = "Saved (paste a new secret to replace it)";
+        const checked = await page.invoke(channel, { ...request(), parentPage: parent.value });
+        for (const node of clear) Object.assign(node, { value: "", placeholder: saved });
         status.textContent = `Saved: ${checked.workspace ? `workspace ${checked.workspace}, ` : ""}new pages go under "${checked.parentTitle}".`;
       } catch (caught) {
         status.textContent = `Not saved: ${page.reason(caught)}`;
       } finally {
-        save.disabled = false;
+        button.disabled = false;
       }
-    });
+    };
+
+    const clientId = input("OAuth client ID", current.notionClientId ?? "");
+    const clientSecret = input(current.notionClientId ? saved : "OAuth client secret", "", true);
+    const signIn = el("button", "act", "Sign in with Notion");
+    signIn.addEventListener("click", () => run(signIn, "notion-sign-in", () => ({ clientId: clientId.value, clientSecret: clientSecret.value }), [clientSecret]));
+
+    const token = input(current.notion && !current.notionClientId ? saved : "Internal integration secret (ntn_…)", "", true);
+    const save = el("button", "act", "Check and save");
+    save.addEventListener("click", () => run(save, "notion-setup", () => ({ token: token.value }), [token]));
+
     body.append(
       el("div", "group", "Notion"),
-      el("div", "sub", "1. notion.so/my-integrations → New integration (internal) → copy its secret.\n2. On the page new pages should go under: ••• → Connections → add the integration.\n3. Paste both here."),
-      token,
-      el("div", "sub", " "),
       parent,
+      el("div", "group", "Sign in (OAuth connection)"),
+      steps(`notion.so/profile/integrations → New connection → OAuth, redirect URI ${current.notionRedirectUri ?? ""} → copy its client ID and secret. When Notion asks, share the page above (and any others).`),
+      clientId,
+      clientSecret,
+      signIn,
+      el("div", "group", "Or an internal integration"),
+      steps("If you may create internal connections: copy its secret, and on the page above, ••• → Connections → add it."),
+      token,
       save,
       status,
     );
-    body.querySelector(".sub").style.whiteSpace = "pre-line";
   }
 
   exports.start = function start(core) {

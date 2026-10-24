@@ -470,9 +470,12 @@
     snippets: () => snippets(),
     "fill-snippet": fillSnippet,
     "notion-setup": notionSetup,
+    "notion-sign-in": notionSignIn,
     settings: () => ({
       notion: notion.configured(),
       notionParentPage: notion.settings().parentPage || null,
+      notionClientId: notion.settings().clientId || null,
+      notionRedirectUri: notion.redirectUri,
       incidentPattern: settingsOf("incidents", { channelPattern: "^(inc|incident)[-_]" }).channelPattern,
       focus: focus ? { on: true, until: focus.until } : { on: false },
     }),
@@ -487,6 +490,19 @@
     updateSettings((current) => ({ ...current, notion: { ...current.notion, token, parentPage } }));
     log(`Notion set up (workspace ${checked.workspace ?? "?"}, parent page "${checked.parentTitle}")`);
     return checked;
+  }
+
+  /** Signs in with a public (OAuth) connection; saves the token only once the parent page checks out. A blank secret keeps the saved one. */
+  async function notionSignIn({ clientId, clientSecret, parentPage }) {
+    clientId = clientId?.trim() || notion.settings().clientId;
+    clientSecret = clientSecret?.trim() || notion.settings().clientSecret;
+    if (!clientId || !clientSecret) throw new Error("Paste the connection's client ID and client secret first");
+    parentPage = parentPage?.trim() ?? "";
+    const { token, refreshToken, workspace } = await notion.signIn({ clientId, clientSecret });
+    const checked = await notion.check({ token, parentPage });
+    updateSettings((current) => ({ ...current, notion: { ...current.notion, token, refreshToken, clientId, clientSecret, parentPage } }));
+    log(`Notion signed in (workspace ${workspace ?? "?"}, parent page "${checked.parentTitle}")`);
+    return { ...checked, workspace: workspace ?? checked.workspace };
   }
 
   exports.start = function start(store) {

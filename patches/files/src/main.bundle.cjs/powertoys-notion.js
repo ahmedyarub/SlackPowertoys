@@ -2,11 +2,15 @@
 // Powertoys (local addition): Notion, through its API with your integration's token.
 // Settings (settings.json): "notion": { "token": "<secret from notion.so/my-integrations>", "parentPage": "<page link or
 // id where new pages go>", "previews": true }. Share the pages you want with the integration in Notion.
+// Or sign in with a public (OAuth) connection: "clientId", "clientSecret", and the token it gives ("refreshToken" too).
 // ---------------------------------------------------------------------------------------------
 (function (module, exports, __webpack_require__) {
   "use strict";
 
-  const { warn, readSettings } = __webpack_require__("powertoys/main");
+  const electron = __webpack_require__(84157);
+  const http = __webpack_require__(58611);
+  const crypto = __webpack_require__(76982);
+  const { log, warn, readSettings } = __webpack_require__("powertoys/main");
 
   const API = "https://api.notion.com/v1";
   const settings = () => ({ token: "", parentPage: "", previews: true, ...readSettings().notion });
@@ -172,6 +176,50 @@
     return { workspace: bot.bot?.workspace_name ?? null, parentTitle: titleOf(parentObject) };
   }
   exports.check = check;
+
+  // Notion's connection settings list this redirect URI; a server listens on it only while a sign-in waits.
+  const OAUTH_PORT = 47821;
+  exports.redirectUri = `http://localhost:${OAUTH_PORT}/notion/callback`;
+
+  /** Signs in through Notion in the browser (you pick the pages to share there) -> { token, refreshToken, workspace }. */
+  async function signIn({ clientId, clientSecret }) {
+    const state = crypto.randomBytes(16).toString("hex");
+    const servers = [];
+    const code = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("Notion: no answer from the browser within 5 minutes")), 5 * 60e3);
+      const handle = (request, response) => {
+        const url = new URL(request.url, exports.redirectUri);
+        if (url.pathname !== "/notion/callback") return response.writeHead(404).end();
+        const ok = url.searchParams.get("state") === state && url.searchParams.get("code");
+        response.writeHead(ok ? 200 : 400, { "content-type": "text/html; charset=utf-8" });
+        response.end(ok ? "<p>Notion is connected to Slack Powertoys. You can close this tab.</p>" : `<p>Not connected: ${url.searchParams.get("error") ?? "unexpected answer"}.</p>`);
+        if (url.searchParams.get("state") !== state) return;
+        clearTimeout(timer);
+        if (ok) resolve(url.searchParams.get("code"));
+        else reject(new Error(`Notion: ${url.searchParams.get("error") ?? "sign-in failed"}`));
+      };
+      // "localhost" can be 127.0.0.1 or ::1 to the browser, so both.
+      for (const host of ["127.0.0.1", "::1"]) {
+        const server = http.createServer(handle);
+        server.on("error", (caught) => (host === "127.0.0.1" ? reject(new Error(`Notion: can't listen on port ${OAUTH_PORT}: ${caught.message}`)) : warn(`notion sign-in on ::1: ${caught.message}`)));
+        server.listen(OAUTH_PORT, host);
+        servers.push(server);
+      }
+      const authorize = new URL("https://api.notion.com/v1/oauth/authorize");
+      for (const [key, value] of Object.entries({ client_id: clientId, response_type: "code", owner: "user", redirect_uri: exports.redirectUri, state })) authorize.searchParams.set(key, value);
+      electron.shell.openExternal(authorize.toString());
+    }).finally(() => servers.forEach((server) => server.close()));
+    const response = await fetch(`${API}/oauth/token`, {
+      method: "POST",
+      headers: { authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`, "content-type": "application/json" },
+      body: JSON.stringify({ grant_type: "authorization_code", code, redirect_uri: exports.redirectUri }),
+    });
+    const json = await response.json();
+    if (!response.ok) throw new Error(`Notion: ${json.error_description ?? json.message ?? json.error ?? response.status}`);
+    log(`notion sign-in: token for workspace ${json.workspace_name ?? "?"}${json.refresh_token ? ", with a refresh token" : ""}${json.expires_in ? `, expires in ${json.expires_in}s` : ""}`);
+    return { token: json.access_token, refreshToken: json.refresh_token ?? null, workspace: json.workspace_name ?? null };
+  }
+  exports.signIn = signIn;
 
   /** Pages and databases whose title matches -> [{ title, url, icon, editedAt }]. */
   async function search(query, limit = 10) {
