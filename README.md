@@ -93,7 +93,7 @@ nothing of that file is in the patch. The patcher reconstructs the edited file f
 |---|---|
 | `src/main.bundle.cjs/33229-main/0050.js` | One line after the app's start-up returns its store: `__webpack_require__("powertoys/main").start(appStore)`. |
 | `src/main.bundle.cjs/33229-main/0037.js` | One line in the tray menu's builder, before Preferences: `__webpack_require__("powertoys/main").addTrayItems(menu)`. |
-| `src/main.bundle.cjs/6440.js` | Windows auto-start: when there is no `slack.exe` one folder up, register the running executable with `--startup` only. |
+| `src/main.bundle.cjs/6440-windows-startup-login-items.js` | Windows auto-start: when there is no `slack.exe` one folder up, register the running executable with `--startup` only. |
 | `src/preload.bundle.js/_runtime.js` | One line after the preload creates its store: `webpackRequire("powertoys/page").start(store)`. |
 | `src/main.bundle.cjs/_bundle.json`, `src/preload.bundle.js/_bundle.json` | Add the new modules to their bundles. |
 

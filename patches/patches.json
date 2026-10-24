@@ -46,7 +46,7 @@
    ]
   },
   {
-   "path": "src/main.bundle.cjs/6440.js",
+   "path": "src/main.bundle.cjs/6440-windows-startup-login-items.js",
    "kind": "edit",
    "baseSha256": "75bb050d933a83cf3569bae8e598a297a1c9c2cf9b3eaf45cc6c5c29b5fde74f",
    "resultSha256": "f37480301666c9af23b232cc9f5858bfa8eedb2437c57c95256a2d5c78a09923",
@@ -83,8 +83,8 @@
   {
    "path": "src/main.bundle.cjs/_bundle.json",
    "kind": "edit",
-   "baseSha256": "08bda842966f7b42a6625dca4aab46df243820e16725eafa034ef4b9db294979",
-   "resultSha256": "c9b2235f65b9fcf3c559cad9f781ca875ca3c3252bcf93ecd6deaf2df1b5db13",
+   "baseSha256": "0dc90aee9df4f47fefd127c1a239d1790967533bd9211d590cd4f0793ec74acc",
+   "resultSha256": "2da46f93d5e527a278d88f883a2627135e458b9204656a32ca4686d4e3bbe753",
    "hunks": [
     {
      "at": 6207,
@@ -131,8 +131,8 @@
   {
    "path": "src/preload.bundle.js/_bundle.json",
    "kind": "edit",
-   "baseSha256": "00b42b02f238bb5d1d190b33d8e929f24cc56a1927bebe21166aa9b2bda26be5",
-   "resultSha256": "0164ab03b67c3d6b9f1eccc084e7582128fca926e45b9cf07b3156402a4f5635",
+   "baseSha256": "aad85021f2b2a61de75a17a714919fa9c991877c01e626da5ef90db664c70f94",
+   "resultSha256": "5c8da972931eee576a7987287fb0f2613e92857fab2dcdfb79891ea5b3a50f5c",
    "hunks": [
     {
      "at": 2657,
@@ -157,11 +157,11 @@
   {
    "path": "src/preload.bundle.js/_runtime.js",
    "kind": "edit",
-   "baseSha256": "4b8dc953801b9af89f3885186832be5b44553e7791e1b755f1e18639f783a624",
-   "resultSha256": "d431ac56baf1fd831e99de0f7c23f169eeddb9acc31e3e466bfcb354b09116ab",
+   "baseSha256": "0ed51fc4284115c1b689da4132ffc75e634bf94f6f204c8e62ec8c39d94a98a0",
+   "resultSha256": "5fb3c0a9e2726922d8fd911b9853cdc51cfba57c30b8068446cd533253e11355",
    "hunks": [
     {
-     "at": 5370,
+     "at": 5371,
      "remove": 0,
      "add": [
       [
