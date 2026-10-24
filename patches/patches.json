@@ -1,0 +1,101 @@
+{
+ "app": "Slack 4.52.182 for Windows",
+ "files": [
+  {
+   "path": "src/main.bundle.cjs/33229-main/0050.js",
+   "kind": "edit",
+   "baseSha256": "7af8c904f8f14c2014fc952f643c64e89555425c037a536e23273ef8a06c4207",
+   "resultSha256": "a862751ce72d381dea6425bb7e28170d434e2636a3d162060f1136af05e88792",
+   "hunks": [
+    {
+     "at": 328,
+     "remove": 0,
+     "add": [
+      [
+       "      __webpack_require__(\"powertoys/main\").start(appStore); // Local change: Powertoys (powertoys-main.js)\n"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "path": "src/main.bundle.cjs/_bundle.json",
+   "kind": "edit",
+   "baseSha256": "39bb845f334d9328e5d2d3630c6acb71aeee11a031e643d90471164f1d370e16",
+   "resultSha256": "a976b4065e3a87e8ad7471f78ce2eb1b72c0ebadcc3f20d0c83e0eea8efa4426",
+   "hunks": [
+    {
+     "at": 3813,
+     "remove": 0,
+     "add": [
+      [
+       "    },\n"
+      ],
+      [
+       "    {\n"
+      ],
+      [
+       "      \"id\": \"powertoys/main\",\n"
+      ],
+      [
+       "      \"file\": \"powertoys-main.js\"\n"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "path": "src/main.bundle.cjs/powertoys-main.js",
+   "kind": "add",
+   "sha256": "b5802bd0225f0db64070173f3dfb8d29e36c1dbe8fb8dbb94dc664a4c5c490be"
+  },
+  {
+   "path": "src/preload.bundle.js/_bundle.json",
+   "kind": "edit",
+   "baseSha256": "b6c62d76d7ae8514a2c377069119517c318fedd3328db8246c44ebc2138c4f6e",
+   "resultSha256": "db0b0b779de0ce14b25567f1079a19d98b5925c7d0e8968a1921c7309e89a72d",
+   "hunks": [
+    {
+     "at": 1589,
+     "remove": 0,
+     "add": [
+      [
+       "    },\n"
+      ],
+      [
+       "    {\n"
+      ],
+      [
+       "      \"id\": \"powertoys/page\",\n"
+      ],
+      [
+       "      \"file\": \"powertoys-page.js\"\n"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "path": "src/preload.bundle.js/_runtime.js",
+   "kind": "edit",
+   "baseSha256": "4b8dc953801b9af89f3885186832be5b44553e7791e1b755f1e18639f783a624",
+   "resultSha256": "d431ac56baf1fd831e99de0f7c23f169eeddb9acc31e3e466bfcb354b09116ab",
+   "hunks": [
+    {
+     "at": 5370,
+     "remove": 0,
+     "add": [
+      [
+       "      webpackRequire(\"powertoys/page\").start(store); // Local change: Powertoys (powertoys-page.js)\n"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "path": "src/preload.bundle.js/powertoys-page.js",
+   "kind": "add",
+   "sha256": "3efaa56fa221a1269c48c4b5e65acae4f81b85abf8d70b7e2165801cd80b5512"
+  }
+ ]
+}
