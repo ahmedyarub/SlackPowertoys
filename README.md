@@ -14,18 +14,35 @@ patches/patches.json        the patch manifest: every file, its hashes and its e
 patches/files/...           files that are entirely new (written for Powertoys), copied in as they are
 ```
 
-`patches/patches.json` lists 6 files:
+`patches/patches.json` lists 9 files:
 
-- **2 new files** (`"kind": "add"`), written for Powertoys:
+- **3 new files** (`"kind": "add"`), written for Powertoys:
   - `src/main.bundle.cjs/powertoys-main.js`: the main-process half (module id `"powertoys/main"`).
   - `src/preload.bundle.js/powertoys-page.js`: the in-page half (module id `"powertoys/page"`).
-- **4 edits** (`"kind": "edit"`) to the app's own files: two one-line hooks that start the two halves, and two
-  manifest entries that add the new modules to their bundles.
+  - `mcp/slack-transcripts.mjs`: an MCP server for Claude Desktop (runs on its own with Node, outside Slack).
+- **6 edits** (`"kind": "edit"`) to the app's own files: three one-line hooks (start the two halves, add the tray
+  menu item), two manifest entries that add the new modules to their bundles, and a small change to Windows
+  auto-start.
 
 ## What Powertoys adds
 
-This first release is the foundation the features build on:
+- **Mark everything as read**, in every signed-in workspace (a tray menu item) or in one (right-click a workspace
+  icon). It marks each channel, DM and group DM with unreads as read at its latest message, the same Web API calls
+  Slack's own "Mark all as read" makes; Slack then updates its sidebar itself.
+- **Slack clip transcripts for Claude Desktop.** While Slack runs, Powertoys serves clip transcripts (what Slack shows
+  under "View transcript") on `127.0.0.1`, with a random port and a bearer token written to
+  `%APPDATA%Slackpowertoysridge.json` (removed when Slack quits; `{"bridge": false}` in `settings.json`
+  turns it off). `mcp/slack-transcripts.mjs` is a dependency-free MCP server over it, with two tools:
+  `get_slack_clip_transcript` (a message link, a file link or a file id) and `list_slack_clips`. Add it to Claude
+  Desktop in `%APPDATA%Claudeclaude_desktop_config.json` and restart Claude Desktop:
 
+  ```json
+  "mcpServers": {
+    "slack-transcripts": { "command": "C:/Program Files/nodejs/node.exe", "args": ["<your-copy>/mcp/slack-transcripts.mjs"] }
+  }
+  ```
+- **Auto-start for a copy run from its own folder:** with no Squirrel launcher (`slack.exe`) one folder up, "Launch
+  on login" registers the running executable itself.
 - **Mods:** CSS and JavaScript files in `%APPDATA%\Slack\powertoys\mods\` are inserted into, and run in, Slack's
   pages each time they load. `*.css` restyles Slack; `*.js` can add behaviour. Mods are read fresh on every load, so
   a change takes effect when Slack reloads.
@@ -49,6 +66,8 @@ nothing of that file is in the patch. The patcher reconstructs the edited file f
 | File | What it does |
 |---|---|
 | `src/main.bundle.cjs/33229-main/0050.js` | One line after the app's start-up returns its store: `__webpack_require__("powertoys/main").start(appStore)`. |
+| `src/main.bundle.cjs/33229-main/0037.js` | One line in the tray menu's builder, before Preferences: `__webpack_require__("powertoys/main").addTrayItems(menu)`. |
+| `src/main.bundle.cjs/6440.js` | Windows auto-start: when there is no `slack.exe` one folder up, register the running executable with `--startup` only. |
 | `src/preload.bundle.js/_runtime.js` | One line after the preload creates its store: `webpackRequire("powertoys/page").start(store)`. |
 | `src/main.bundle.cjs/_bundle.json`, `src/preload.bundle.js/_bundle.json` | Add the new modules to their bundles. |
 
@@ -72,7 +91,7 @@ node patcher/apply-patches.mjs patches <your-copy>           # apply
 ## How the package was checked
 
 1. **Applied to unmodified files, it reproduces the Powertoys build byte for byte.**
-2. **No line of the package repeats a line of the app (40 characters or more)**, except three generic ones in the
-   new main-process module: its module wrapper, `(function (module, exports, __webpack_require__) {`, and two
-   `require` calls of Electron's `path` and `electron` modules.
+2. **No line of the package repeats a line of the app (40 characters or more)**, except seven generic ones in the
+   two new modules: their module wrapper, `(function (module, exports, __webpack_require__) {`, and `require` calls of
+   the `electron`, `path`, `http` and `crypto` modules.
 3. **Applying it twice is refused**, as is applying it to any other files.

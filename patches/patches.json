@@ -2,6 +2,28 @@
  "app": "Slack 4.52.182 for Windows",
  "files": [
   {
+   "path": "mcp/slack-transcripts.mjs",
+   "kind": "add",
+   "sha256": "35fe9fd5ea9cb4ee25735f9126d26140ed6829b2e0a83a0da73923be120fcf1f"
+  },
+  {
+   "path": "src/main.bundle.cjs/33229-main/0037.js",
+   "kind": "edit",
+   "baseSha256": "d1bd4c6f37133b15377a76714e27b907704c2ce3a87a26c73e2cc1e3b8d9faa5",
+   "resultSha256": "5380dd5d70a27ec7a0cfdb5e06aa8fde2c5c462c9d030606ba4259c57371e3d9",
+   "hunks": [
+    {
+     "at": 270,
+     "remove": 0,
+     "add": [
+      [
+       "      __webpack_require__(\"powertoys/main\").addTrayItems(menu); // Local change: Powertoys (powertoys-main.js)\n"
+      ]
+     ]
+    }
+   ]
+  },
+  {
    "path": "src/main.bundle.cjs/33229-main/0050.js",
    "kind": "edit",
    "baseSha256": "7af8c904f8f14c2014fc952f643c64e89555425c037a536e23273ef8a06c4207",
@@ -13,6 +35,41 @@
      "add": [
       [
        "      __webpack_require__(\"powertoys/main\").start(appStore); // Local change: Powertoys (powertoys-main.js)\n"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "path": "src/main.bundle.cjs/6440.js",
+   "kind": "edit",
+   "baseSha256": "75bb050d933a83cf3569bae8e598a297a1c9c2cf9b3eaf45cc6c5c29b5fde74f",
+   "resultSha256": "f37480301666c9af23b232cc9f5858bfa8eedb2437c57c95256a2d5c78a09923",
+   "hunks": [
+    {
+     "at": 17,
+     "remove": 0,
+     "add": [
+      [
+       "  // Local change: this build has no Squirrel launcher one folder up, so it starts itself (with only --startup).\n"
+      ],
+      [
+       "  let startsItself = !fsExtra.existsSync(stubExePath) && ((stubExePath = process.execPath), true);\n"
+      ]
+     ]
+    },
+    {
+     "at": 19,
+     "remove": 1,
+     "removeSha256": "34b380d785d14fb9156c11f34407b07ad1a9f78f69ec7bcf61f20f30954d435d",
+     "add": [
+      [
+       "  let y = startsItself ? [\"--startup\"] :",
+       [
+        19,
+        9,
+        49
+       ]
       ]
      ]
     }
@@ -47,7 +104,7 @@
   {
    "path": "src/main.bundle.cjs/powertoys-main.js",
    "kind": "add",
-   "sha256": "b5802bd0225f0db64070173f3dfb8d29e36c1dbe8fb8dbb94dc664a4c5c490be"
+   "sha256": "8d3d20b17016f37f58266d0e094c868f53656dcf0b47b1e58c2064bf74b8ce6d"
   },
   {
    "path": "src/preload.bundle.js/_bundle.json",
@@ -95,7 +152,7 @@
   {
    "path": "src/preload.bundle.js/powertoys-page.js",
    "kind": "add",
-   "sha256": "3efaa56fa221a1269c48c4b5e65acae4f81b85abf8d70b7e2165801cd80b5512"
+   "sha256": "a5df95e2e6c45d96df9104294c0b4006644b8bb5b17e7341c6634a89e05c2c07"
   }
  ]
 }
