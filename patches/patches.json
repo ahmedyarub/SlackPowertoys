@@ -83,11 +83,11 @@
   {
    "path": "src/main.bundle.cjs/_bundle.json",
    "kind": "edit",
-   "baseSha256": "0dc90aee9df4f47fefd127c1a239d1790967533bd9211d590cd4f0793ec74acc",
-   "resultSha256": "2da46f93d5e527a278d88f883a2627135e458b9204656a32ca4686d4e3bbe753",
+   "baseSha256": "fb7b64ecb07e5af832d2361fae4eba88af9d15f98d78e1798a8fb950b1b0c9e9",
+   "resultSha256": "abf2687c13f804ad139c072a7f56a3eede87646f6f036ebc6711aad8813cce6c",
    "hunks": [
     {
-     "at": 6207,
+     "at": 6531,
      "remove": 0,
      "add": [
       [
@@ -131,11 +131,11 @@
   {
    "path": "src/preload.bundle.js/_bundle.json",
    "kind": "edit",
-   "baseSha256": "aad85021f2b2a61de75a17a714919fa9c991877c01e626da5ef90db664c70f94",
-   "resultSha256": "5c8da972931eee576a7987287fb0f2613e92857fab2dcdfb79891ea5b3a50f5c",
+   "baseSha256": "3924b9d2aca28048076479ce3edc8197cff34e57cccac5583f632bdd7f25cb3a",
+   "resultSha256": "f381625d46131a7979ed9029916fe5d495d0a278294409463f03bfa2dfa55abc",
    "hunks": [
     {
-     "at": 2657,
+     "at": 2935,
      "remove": 0,
      "add": [
       [
