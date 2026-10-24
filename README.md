@@ -14,16 +14,19 @@ patches/patches.json        the patch manifest: every file, its hashes and its e
 patches/files/...           files that are entirely new (written for Powertoys), copied in as they are
 ```
 
-`patches/patches.json` lists 11 files:
+`patches/patches.json` lists 18 files:
 
-- **5 new files** (`"kind": "add"`), written for Powertoys:
-  - `src/main.bundle.cjs/powertoys-main.js`: the main-process half (module id `"powertoys/main"`).
-  - `src/main.bundle.cjs/powertoys-claude.js`: Slack and Claude, in the main process (module id `"powertoys/claude"`).
-  - `src/preload.bundle.js/powertoys-page.js`: the in-page half (module id `"powertoys/page"`).
-  - `mcp/slack-powertoys.mjs`: an MCP server for Claude Desktop (runs on its own with Node, outside Slack).
-  - `mcp/claude-code-hook.mjs`: a Claude Code hook (runs on its own with Node).
+- **12 new files** (`"kind": "add"`), written for Powertoys:
+  - main process: `powertoys-main.js` (`"powertoys/main"`), `powertoys-claude.js` (Slack for Claude, the bridge),
+    `powertoys-ai.js` (Claude through the Claude Code CLI), `powertoys-notion.js` (Notion API),
+    `powertoys-dev.js` (GitHub through `gh`, editors, terminals, gists, repository search),
+    `powertoys-assist.js` (the developer features), all in `src/main.bundle.cjs/`;
+  - Slack's page: `powertoys-page.js`, `powertoys-page-dev.js`, `powertoys-page-compose.js`,
+    `powertoys-page-panel.js`, in `src/preload.bundle.js/`;
+  - `mcp/slack-powertoys.mjs` (an MCP server for Claude Desktop) and `mcp/claude-code-hook.mjs` (a Claude Code hook),
+    which run on their own with Node.
 - **6 edits** (`"kind": "edit"`) to the app's own files: three one-line hooks (start the two halves, add the tray
-  menu item), two manifest entries that add the new modules to their bundles, and a small change to Windows
+  menu items), two manifest entries that add the new modules to their bundles, and a small change to Windows
   auto-start.
 
 ## What Powertoys adds
@@ -67,6 +70,24 @@ patches/files/...           files that are entirely new (written for Powertoys),
   message to yourself) in the workspace linked to the session's folder. Settings under `claude.codeNotify`:
   `minMinutes` (default 5), `status` (default false: also show "Claude Code: working on <folder>" as your Slack
   status while a session works), `workspace` (a workspace id for folders that are not linked).
+- **Developer features** (they use Claude through the Claude Code CLI, signed in as you, with a lean prompt; Notion
+  through an integration token in `settings.json` under `notion`; GitHub through the `gh` CLI):
+  - **Notion:** link previews (title, path, status, assignees, last edit, first lines); pasting a link pastes its
+    title, linked (Notion, GitHub, or any page's title); **Save to Notion** in the message menu (a thread, huddle or
+    clip, summarized with decisions and action items); **Draft a postmortem in Notion** in incident channels.
+  - **Claude in Slack:** a catch-up digest (tray, panel, or daily); **Explain** for selected text; **Draft a reply with
+    Claude** (in your style, as a draft, never sent); **Ctrl+Shift+K** checks a message for unclear asks, missing
+    context and tone.
+  - **Code:** code blocks get Copy, Open in editor, Run in terminal (asks first), Gist (asks first) and Send to
+    Claude Code; files named in a message (stack traces) open in your editor; GitHub pull request, issue and Actions
+    run cards update live, with Ask Claude to review and Watch (a reminder when the run ends).
+  - **Agents:** a panel (Ctrl+Alt+P) with your Claude Code sessions; a session's permission request can be allowed or
+    denied from Slack (or with `y`/`n` in a thread of your DM, from your phone); **Make this a Claude Code task**
+    starts a session in the workspace's folder that drafts its result into the thread.
+  - **Focus mode** (do not disturb, with Claude letting urgent mentions through and a summary afterwards), **search**
+    across Slack, Notion and your repositories, a **secret guard** before sending (API keys, tokens, private keys,
+    `.env` lines; checked on your computer), and **snippets** (type `;;`, with `{{commits}}`, `{{date}}`,
+    `{{ai: ...}}`).
 - **Auto-start for a copy run from its own folder:** with no Squirrel launcher (`slack.exe`) one folder up, "Launch
   on login" registers the running executable itself.
 - **Mods:** CSS and JavaScript files in `%APPDATA%\Slack\powertoys\mods\` are inserted into, and run in, Slack's

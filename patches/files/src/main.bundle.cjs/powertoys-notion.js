@@ -1,0 +1,172 @@
+// ---------------------------------------------------------------------------------------------
+// Powertoys (local addition): Notion, through its API with your integration's token.
+// Settings (settings.json): "notion": { "token": "<secret from notion.so/my-integrations>", "parentPage": "<page link or
+// id where new pages go>", "previews": true }. Share the pages you want with the integration in Notion.
+// ---------------------------------------------------------------------------------------------
+(function (module, exports, __webpack_require__) {
+  "use strict";
+
+  const { warn, readSettings } = __webpack_require__("powertoys/main");
+
+  const API = "https://api.notion.com/v1";
+  const settings = () => ({ token: "", parentPage: "", previews: true, ...readSettings().notion });
+  exports.settings = settings;
+  exports.configured = () => Boolean(settings().token);
+
+  async function call(method, route, body) {
+    const { token } = settings();
+    if (!token) throw new Error('Notion is not set up: add "notion": { "token": ... } to Powertoys\' settings.json');
+    const response = await fetch(`${API}${route}`, {
+      method,
+      headers: { authorization: `Bearer ${token}`, "notion-version": "2022-06-28", "content-type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const json = await response.json();
+    if (!response.ok) throw Object.assign(new Error(`Notion: ${json.message ?? response.status}`), { status: response.status, code: json.code });
+    return json;
+  }
+
+  /** The id in a Notion link (or an id with or without dashes), dashed; null if there is none. */
+  function notionId(ref) {
+    const match = /([0-9a-f]{32})(?:[?#]|$)/i.exec(String(ref).replace(/-/g, "")) ?? /([0-9a-f]{32})/i.exec(String(ref).replace(/-/g, ""));
+    if (!match) return null;
+    const hex = match[1].toLowerCase();
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+  exports.notionId = notionId;
+  exports.isNotionLink = (url) => /^https:\/\/([\w-]+\.)?notion\.(so|site)\//.test(url);
+
+  const plain = (richText = []) => richText.map((part) => part.plain_text ?? "").join("");
+  const titleOf = (object) => {
+    if (object.object === "database") return plain(object.title);
+    const property = Object.values(object.properties ?? {}).find((each) => each.type === "title");
+    return plain(property?.title) || "Untitled";
+  };
+  const iconOf = (object) => object.icon?.emoji ?? object.icon?.external?.url ?? object.icon?.file?.url ?? null;
+
+  const cache = new Map();
+  function cached(key, ms, load) {
+    const hit = cache.get(key);
+    if (hit && Date.now() - hit.at < ms) return hit.value;
+    const value = load().catch((caught) => (cache.delete(key), Promise.reject(caught)));
+    cache.set(key, { at: Date.now(), value });
+    return value;
+  }
+
+  async function object(id) {
+    try {
+      return await call("GET", `/pages/${id}`);
+    } catch (caught) {
+      if (caught.status === 404 || caught.code === "validation_error") return call("GET", `/databases/${id}`);
+      throw caught;
+    }
+  }
+
+  const userName = (id) => cached(`user:${id}`, 36e5, async () => (await call("GET", `/users/${id}`).catch(() => ({}))).name ?? null);
+
+  async function parentTitle(parent) {
+    if (parent?.type === "page_id") return titleOf(await object(parent.page_id).catch(() => ({ properties: {} })));
+    if (parent?.type === "database_id") return titleOf(await call("GET", `/databases/${parent.database_id}`).catch(() => ({ object: "database", title: [] })));
+    return null;
+  }
+
+  /** The text of a page's first blocks (up to about 400 characters). */
+  async function firstLines(id) {
+    const { results = [] } = await call("GET", `/blocks/${id}/children?page_size=15`).catch(() => ({}));
+    const lines = [];
+    for (const block of results) {
+      const text = plain(block[block.type]?.rich_text);
+      if (text) lines.push(block.type === "to_do" ? `${block.to_do.checked ? "[x]" : "[ ]"} ${text}` : block.type.startsWith("bulleted") ? `- ${text}` : text);
+      if (lines.join("\n").length > 400) break;
+    }
+    return lines.join("\n").slice(0, 420);
+  }
+
+  /**
+   * What a link preview shows: { id, url, title, icon, path: [parent titles], editedAt, editedBy, status, assignees,
+   * excerpt, kind: "page" | "database" | "row" }.
+   */
+  function pageInfo(ref) {
+    const id = notionId(ref);
+    if (!id) return Promise.reject(new Error("not a Notion link"));
+    return cached(`page:${id}`, 5 * 60e3, async () => {
+      const found = await object(id);
+      const pathTitles = [];
+      let parent = found.parent;
+      for (let depth = 0; depth < 3 && parent && parent.type !== "workspace"; depth++) {
+        const title = await parentTitle(parent).catch(() => null);
+        if (!title) break;
+        pathTitles.unshift(title);
+        const next = parent.type === "page_id" ? await object(parent.page_id).catch(() => null) : parent.type === "database_id" ? await call("GET", `/databases/${parent.database_id}`).catch(() => null) : null;
+        parent = next?.parent;
+      }
+      const properties = Object.entries(found.properties ?? {});
+      const status = properties.find(([, p]) => p.type === "status")?.[1]?.status?.name ?? properties.find(([name, p]) => p.type === "select" && /status|state|stage/i.test(name))?.[1]?.select?.name ?? null;
+      const people = properties.find(([name, p]) => p.type === "people" && /assign|owner|lead|dri/i.test(name)) ?? properties.find(([, p]) => p.type === "people");
+      return {
+        id,
+        url: found.url,
+        title: titleOf(found),
+        icon: iconOf(found),
+        path: pathTitles,
+        editedAt: found.last_edited_time ?? null,
+        editedBy: found.last_edited_by?.id ? await userName(found.last_edited_by.id) : null,
+        status,
+        assignees: (people?.[1]?.people ?? []).map((person) => person.name).filter(Boolean),
+        excerpt: found.object === "page" ? await firstLines(id) : "",
+        kind: found.object === "database" ? "database" : found.parent?.type === "database_id" ? "row" : "page",
+      };
+    });
+  }
+  exports.pageInfo = pageInfo;
+
+  // --- Writing pages ---------------------------------------------------------------------------------------
+  const text = (content) => {
+    const parts = [];
+    for (let i = 0; i < String(content).length; i += 1900) parts.push({ type: "text", text: { content: String(content).slice(i, i + 1900) } });
+    return parts.length ? parts : [{ type: "text", text: { content: "" } }];
+  };
+  const linkText = (content, url) => [{ type: "text", text: { content, link: { url } } }];
+  exports.blocks = {
+    heading: (content) => ({ object: "block", type: "heading_2", heading_2: { rich_text: text(content) } }),
+    paragraph: (content) => ({ object: "block", type: "paragraph", paragraph: { rich_text: text(content) } }),
+    link: (content, url) => ({ object: "block", type: "paragraph", paragraph: { rich_text: linkText(content, url) } }),
+    bullet: (content) => ({ object: "block", type: "bulleted_list_item", bulleted_list_item: { rich_text: text(content) } }),
+    todo: (content) => ({ object: "block", type: "to_do", to_do: { rich_text: text(content), checked: false } }),
+    toggle: (content, children) => ({ object: "block", type: "toggle", toggle: { rich_text: text(content), children: children.slice(0, 100) } }),
+    divider: () => ({ object: "block", type: "divider", divider: {} }),
+  };
+
+  /** A new page under settings.parentPage (a page, or a database: then a row) -> { id, url }. */
+  async function createPage({ title, children = [] }) {
+    const parentId = notionId(settings().parentPage);
+    if (!parentId) throw new Error('Notion: set "notion": { "parentPage": "<page link>" } in Powertoys\' settings.json (and share that page with the integration)');
+    const parentObject = await object(parentId);
+    let parent;
+    let properties;
+    if (parentObject.object === "database") {
+      const titleName = Object.entries(parentObject.properties).find(([, p]) => p.type === "title")?.[0] ?? "Name";
+      parent = { database_id: parentId };
+      properties = { [titleName]: { title: text(title) } };
+    } else {
+      parent = { page_id: parentId };
+      properties = { title: { title: text(title) } };
+    }
+    const page = await call("POST", "/pages", { parent, properties, children: children.slice(0, 100) });
+    for (let i = 100; i < children.length; i += 100) await call("PATCH", `/blocks/${page.id}/children`, { children: children.slice(i, i + 100) });
+    return { id: page.id, url: page.url };
+  }
+  exports.createPage = createPage;
+
+  /** Pages and databases whose title matches -> [{ title, url, icon, editedAt }]. */
+  async function search(query, limit = 10) {
+    const { results = [] } = await call("POST", "/search", { query, page_size: limit });
+    return results.map((each) => ({ title: titleOf(each), url: each.url, icon: iconOf(each), editedAt: each.last_edited_time }));
+  }
+  exports.search = search;
+
+  exports.warnOnce = (() => {
+    let warned = false;
+    return (message) => warned || ((warned = true), warn(message));
+  })();
+});

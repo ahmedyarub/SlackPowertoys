@@ -554,11 +554,15 @@
   }
 
   const STATUS_PREFIX = "Claude Code: ";
-  async function claudeCodeEvent({ event, cwd, message, seconds, summary }) {
+  async function claudeCodeEvent(body) {
+    const { event, cwd, message, seconds, summary } = body;
+    // The agents panel keeps track of sessions (powertoys-assist.js).
+    __webpack_require__("powertoys/assist").trackSession(body);
     const page = requirePage();
     const team = await teamForFolder(page, cwd);
     const { minMinutes, status } = settings().codeNotify;
     const where = cwd ? path.basename(cwd) : "a session";
+    if (event === "prompt") return { done: true };
     if (event === "start") {
       if (status) {
         const profile = { status_text: `${STATUS_PREFIX}working on ${where}`, status_emoji: ":robot_face:", status_expiration: Math.floor(Date.now() / 1000) + 2 * 3600 };
@@ -667,6 +671,7 @@
     "GET /huddle": (q) => huddleTranscript({ huddle: q.huddle }),
     "POST /draft": (q, body) => createDraft(body),
     "POST /claude-code": (q, body) => claudeCodeEvent(body),
+    "POST /claude-code/permission": (q, body) => __webpack_require__("powertoys/assist").permission(body),
   };
 
   function readBody(request) {
@@ -713,6 +718,9 @@
     });
     electron.app.on("will-quit", () => fs.rmSync(file, { force: true }));
   }
+
+  // For powertoys/assist.
+  Object.assign(exports, { settings, requirePage, readThread, unreads, search, myMessages, createDraft, huddleTranscript, clipTranscripts, teamForFolder, remind, self, conversationName, userName, parseRef, permalink });
 
   exports.start = function start() {
     if (readSettings().bridge) startBridge();

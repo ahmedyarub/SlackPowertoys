@@ -166,6 +166,7 @@
         click: () => markAllRead().catch((caught) => warn(`mark all read failed: ${caught.message}`)),
       }),
     );
+    __webpack_require__("powertoys/assist").addTrayItems(menu);
   };
 
   exports.start = function start(store) {
@@ -174,6 +175,7 @@
     electron.ipcMain.on("powertoys:log", (event, message) => log(`[page] ${String(message).slice(0, 4000)}`));
     electron.ipcMain.handle("powertoys:mark-all-read", (event, teamId) => markAllRead(teamId ?? null));
     __webpack_require__("powertoys/claude").start();
+    __webpack_require__("powertoys/assist").start(store);
     electron.app.on("web-contents-created", (event, webContents) => {
       webContents.on("did-finish-load", () => applyMods(webContents));
     });

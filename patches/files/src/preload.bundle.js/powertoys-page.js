@@ -150,9 +150,10 @@
     menu.style.top = `${Math.min(y, innerHeight - rect.height - 8)}px`;
   }
 
-  // --- "Ask Claude about this" in Slack's message menu -----------------------------------------------------
+  // --- Items in Slack's message menu ----------------------------------------------------------------------
   // Slack draws the menu (.p-message_actions_menu) when a message is right-clicked or its "More actions" clicked; the
-  // message is the list item the click was in, and its timestamp link is its permalink.
+  // message is the list item the click was in, and its timestamp link is its permalink. Page modules add items with
+  // addMessageMenuItem({ label, show(message), run(message) }); a message is { link, teamId, text, element }.
   let lastMessage = null;
   function rememberMessage(event) {
     const item = event.target.closest?.('[data-qa="virtual-list-item"]');
@@ -160,37 +161,104 @@
     if (!ts || !/^\d{10}\.\d{6}$/.test(ts)) return;
     const digits = `p${ts.replace(".", "")}`;
     const link = [...item.querySelectorAll('a[href*="/archives/"]')].find((anchor) => anchor.pathname.endsWith(digits))?.href;
-    if (link) lastMessage = { link, teamId: workspaceOf(item).teamId, at: Date.now() };
+    if (!link) return;
+    const text = item.querySelector('[data-qa="message-text"]')?.innerText ?? "";
+    lastMessage = { link, teamId: workspaceOf(item).teamId, text, element: item, at: Date.now() };
   }
 
   const SPARKLE =
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><path fill="currentColor" d="M10 1.5l1.9 5.2 5.1 1.9-5.1 1.9L10 15.7l-1.9-5.2L3 8.6l5.1-1.9zM15.5 13l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></svg>';
-  function addAskClaude(menu) {
-    if (!lastMessage || Date.now() - lastMessage.at > 5000 || menu.querySelector('[data-qa="powertoys_ask_claude-wrapper"]')) return;
-    const model = menu.querySelector('[data-qa="copy_link-wrapper"]');
-    if (!model) return;
-    const { link, teamId } = lastMessage;
-    const wrapper = model.cloneNode(true);
-    wrapper.dataset.qa = "powertoys_ask_claude-wrapper";
-    wrapper.classList.add("powertoys-ask-claude");
-    for (const node of wrapper.querySelectorAll("[id]")) node.removeAttribute("id");
-    wrapper.querySelector(".c-menu_item__shortcut")?.remove();
-    const icon = wrapper.querySelector(".c-menu_item__icon");
-    if (icon) icon.innerHTML = SPARKLE;
-    wrapper.querySelector(".c-menu_item__label").textContent = "Ask Claude about this";
-    const button = wrapper.querySelector("button") ?? wrapper;
-    button.dataset.qa = "powertoys_ask_claude";
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      // Slack's menu closes on Escape pressed inside it.
-      button.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, bubbles: true }));
-      askClaude({ link, teamId, kind: "message" });
-    });
-    model.after(wrapper);
+  const menuItems = [];
+  exports.addMessageMenuItem = (item) => menuItems.push(item);
+
+  function addMenuItems(menu) {
+    if (!lastMessage || Date.now() - lastMessage.at > 5000 || menu.querySelector(".powertoys-menu-item")) return;
+    let after = menu.querySelector('[data-qa="copy_link-wrapper"]');
+    if (!after) return;
+    const message = lastMessage;
+    for (const item of menuItems) {
+      if (item.show && !item.show(message)) continue;
+      const wrapper = after.cloneNode(true);
+      wrapper.dataset.qa = `powertoys_${item.label.toLowerCase().replace(/\W+/g, "_")}-wrapper`;
+      wrapper.classList.add("powertoys-menu-item");
+      for (const node of wrapper.querySelectorAll("[id]")) node.removeAttribute("id");
+      wrapper.querySelector(".c-menu_item__shortcut")?.remove();
+      const icon = wrapper.querySelector(".c-menu_item__icon");
+      if (icon) icon.innerHTML = SPARKLE;
+      wrapper.querySelector(".c-menu_item__label").textContent = item.label;
+      const button = wrapper.querySelector("button") ?? wrapper;
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        // Slack's menu closes on Escape pressed inside it.
+        button.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, bubbles: true }));
+        item.run(message);
+      });
+      after.after(wrapper);
+      after = wrapper;
+    }
   }
 
-  const PAGE_STYLE = ".powertoys-ask-claude button:hover, .powertoys-ask-claude button:focus { background: #1264a3; color: #fff; }";
+  exports.addMessageMenuItem({ label: "Ask Claude about this", run: ({ link, teamId }) => askClaude({ link, teamId, kind: "message" }) });
+
+  // --- A pop-over for longer answers (Claude's explanations, digests, check results) -----------------------
+  function popover({ title, text, actions = [], x = null, y = null }) {
+    const root = ui();
+    root.querySelector(".popover")?.remove();
+    const box = document.createElement("div");
+    box.className = "popover";
+    const head = document.createElement("div");
+    head.className = "popover-head";
+    head.textContent = title;
+    const close = document.createElement("button");
+    close.className = "popover-close";
+    close.textContent = "×";
+    close.addEventListener("click", () => box.remove());
+    head.appendChild(close);
+    const body = document.createElement("div");
+    body.className = "popover-body";
+    body.textContent = text;
+    box.append(head, body);
+    if (actions.length) {
+      const row = document.createElement("div");
+      row.className = "popover-actions";
+      for (const action of actions) {
+        const button = document.createElement("button");
+        button.textContent = action.label;
+        button.addEventListener("click", () => (action.keepOpen || box.remove(), action.run(box)));
+        row.appendChild(button);
+      }
+      box.appendChild(row);
+    }
+    root.appendChild(box);
+    if (x !== null) {
+      const rect = box.getBoundingClientRect();
+      box.style.left = `${Math.max(8, Math.min(x, innerWidth - rect.width - 8))}px`;
+      box.style.top = `${Math.max(8, Math.min(y, innerHeight - rect.height - 8))}px`;
+      box.style.transform = "none";
+    }
+    return { box, body, setText: (value) => (body.textContent = value) };
+  }
+
+  const POPOVER_STYLE = `
+      .popover { position: fixed; z-index: 2147483647; left: 50%; top: 18%; transform: translateX(-50%); width: min(560px, 90vw);
+        max-height: 60vh; display: flex; flex-direction: column; border-radius: 8px; background: #222529; color: #d1d2d3;
+        font: 14px/1.45 Lato, "Segoe UI", sans-serif; box-shadow: 0 0 0 1px rgba(255,255,255,.13), 0 8px 24px rgba(0,0,0,.5); }
+      .popover-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; font-weight: 700;
+        border-bottom: 1px solid rgba(255,255,255,.1); }
+      .popover-close { background: none; border: 0; color: #d1d2d3; font-size: 18px; cursor: pointer; }
+      .popover-body { padding: 12px 14px; overflow: auto; white-space: pre-wrap; }
+      .popover-actions { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid rgba(255,255,255,.1); }
+      .popover-actions button { font: inherit; font-weight: 700; color: #fff; background: #007a5a; border: 0; border-radius: 4px;
+        padding: 5px 12px; cursor: pointer; }
+      .popover-actions button + button { background: #3f4246; }`;
+
+  const invoke = (name, request) => electron.ipcRenderer.invoke(`powertoys:${name}`, request);
+  const currentTeamId = () => /\/client\/([A-Z0-9]+)/.exec(location.pathname)?.[1] ?? null;
+  Object.assign(exports, { ui, notice, popover, invoke, reason, workspaceOf, currentTeamId, log, on: (channel, fn) => electron.ipcRenderer.on(channel, (event, payload) => fn(payload)) });
+
+  const PAGE_STYLE = ".powertoys-menu-item button:hover, .powertoys-menu-item button:focus { background: #1264a3; color: #fff; }";
+  const PAGE_MODULES = ["powertoys/page-dev", "powertoys/page-compose", "powertoys/page-panel"];
 
   exports.start = function start(store) {
     electron.ipcRenderer.on("powertoys:huddle-ended", (event, { teamId, link, where }) =>
@@ -215,12 +283,20 @@
       const style = document.createElement("style");
       style.textContent = PAGE_STYLE;
       document.head.appendChild(style);
+      ui().querySelector("style").textContent += POPOVER_STYLE;
+      for (const name of PAGE_MODULES) {
+        try {
+          __webpack_require__(name).start(exports);
+        } catch (caught) {
+          log(`${name} did not start: ${caught.message}`);
+        }
+      }
       new MutationObserver((mutations) => {
         for (const mutation of mutations)
           for (const node of mutation.addedNodes) {
             if (node.nodeType !== 1) continue;
             const menus = node.matches(".p-message_actions_menu") ? [node] : node.querySelectorAll(".p-message_actions_menu");
-            for (const menu of menus) addAskClaude(menu);
+            for (const menu of menus) addMenuItems(menu);
           }
       }).observe(document.body, { childList: true, subtree: true });
       document.addEventListener("keydown", (event) => event.key === "Escape" && closeMenu(), true);
