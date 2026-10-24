@@ -266,6 +266,7 @@
   const PAGE_MODULES = ["powertoys/page-dev", "powertoys/page-compose", "powertoys/page-panel"];
 
   exports.start = function start(store) {
+    electron.ipcRenderer.on("powertoys:notice", (event, { text }) => notice(text));
     electron.ipcRenderer.on("powertoys:huddle-ended", (event, { teamId, link, where }) =>
       notice(`A huddle in ${where} ended with a transcript.`, { label: "Summarize with Claude", run: () => askClaude({ link, teamId, kind: "huddle" }) }),
     );

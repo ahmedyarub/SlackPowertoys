@@ -16,11 +16,12 @@ patches/files/...           files that are entirely new (written for Powertoys),
 
 `patches/patches.json` lists 18 files:
 
-- **12 new files** (`"kind": "add"`), written for Powertoys:
+- **13 new files** (`"kind": "add"`), written for Powertoys:
   - main process: `powertoys-main.js` (`"powertoys/main"`), `powertoys-claude.js` (Slack for Claude, the bridge),
     `powertoys-ai.js` (Claude through the Claude Code CLI), `powertoys-notion.js` (Notion API),
     `powertoys-dev.js` (GitHub through `gh`, editors, terminals, gists, repository search),
-    `powertoys-assist.js` (the developer features), all in `src/main.bundle.cjs/`;
+    `powertoys-assist.js` (the developer features), `powertoys-huddle.js` (huddles: captions, questions to Claude,
+    headphones), all in `src/main.bundle.cjs/`;
   - Slack's page: `powertoys-page.js`, `powertoys-page-dev.js`, `powertoys-page-compose.js`,
     `powertoys-page-panel.js`, in `src/preload.bundle.js/`;
   - `mcp/slack-powertoys.mjs` (an MCP server for Claude Desktop) and `mcp/claude-code-hook.mjs` (a Claude Code hook),
@@ -69,11 +70,15 @@ patches/files/...           files that are entirely new (written for Powertoys),
 - **A transcript for every video:** each video or audio file posted gets Slack's own transcript requested right away
   (what "Generate transcript" does), so it is there when you need it (`"claude": {"autoTranscripts": false}` turns
   it off).
+- **Huddles:** captions show side by side instead of the huddle's thread; a faint "Claude" chip in the huddle window
+  picks one of your Claude Code sessions in the workspace's folder; right-click a caption, **Ask Claude**, and the
+  question is asked in that session (it stays there) with a quick answer in a pop-up. When a huddle rings, Bluetooth
+  goes on and Windows connects your paired headphones (`"huddle": {"headphones": "AirPods"}`; `null` turns it off).
 - **Claude Code tells you in Slack** when a long session finishes or a session needs you: add
   `mcp/claude-code-hook.mjs` to Claude Code's hooks (`UserPromptSubmit`, `Stop` and `Notification`, in
   `~/.claude/settings.json`; the file's header shows how). You get a Slackbot reminder (it notifies, unlike a
   message to yourself) in the workspace linked to the session's folder. Settings under `claude.codeNotify`:
-  `minMinutes` (default 5), `status` (default false: also show "Claude Code: working on <folder>" as your Slack
+  `minMinutes` (default 5), `"claude": {"reminders": false}` turns the reminders off, `status` (default false: also show "Claude Code: working on <folder>" as your Slack
   status while a session works), `workspace` (a workspace id for folders that are not linked).
 - **Developer features** (they use Claude through the Claude Code CLI, signed in as you, with a lean prompt; Notion
   through the Powertoys panel's Settings tab (Ctrl+Alt+P): sign in with an OAuth connection whose redirect URI is

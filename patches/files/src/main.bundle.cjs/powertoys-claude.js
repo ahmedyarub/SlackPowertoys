@@ -12,7 +12,7 @@
 //   - offers a summary when a huddle you were in ends with a transcript;
 //   - asks Slack to transcribe each video or audio file posted (what "Generate transcript" does), so it is there.
 // Settings (settings.json): "bridge" (default true) and "claude":
-//   { "folders": { "<team id>": "<folder>" }, "huddleSummaries": true, "autoTranscripts": true,
+//   { "folders": { "<team id>": "<folder>" }, "huddleSummaries": true, "autoTranscripts": true, "reminders": true,
 //     "codeNotify": { "minMinutes": 5, "status": false, "workspace": null } }
 // ---------------------------------------------------------------------------------------------
 (function (module, exports, __webpack_require__) {
@@ -25,7 +25,7 @@
   const crypto = __webpack_require__(76982);
   const { log, warn, api, slackPage, signedInTeams, readSettings, updateSettings, powertoysDir } = __webpack_require__("powertoys/main");
 
-  const DEFAULTS = { folders: {}, huddleSummaries: true, autoTranscripts: true, codeNotify: { minMinutes: 5, status: false, workspace: null } };
+  const DEFAULTS = { folders: {}, huddleSummaries: true, autoTranscripts: true, reminders: true, codeNotify: { minMinutes: 5, status: false, workspace: null } };
   function settings() {
     const claude = readSettings().claude ?? {};
     return { ...DEFAULTS, ...claude, codeNotify: { ...DEFAULTS.codeNotify, ...claude.codeNotify } };
@@ -584,6 +584,7 @@
 
   /** A Slackbot reminder to you, due now: unlike a message to yourself, it notifies. */
   async function remind(page, team, text) {
+    if (!settings().reminders) return log(`no reminder (claude.reminders is off): ${text.slice(0, 80)}`);
     const result = await api(page, team, "reminders.add", { text, time: Math.floor(Date.now() / 1000) + 2 });
     if (!result.ok) throw new Error(`reminders.add: ${result.error}`);
     log(`reminded you in ${team.id} (Claude Code)`);

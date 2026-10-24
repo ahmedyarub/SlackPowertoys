@@ -84,7 +84,7 @@
    "path": "src/main.bundle.cjs/_bundle.json",
    "kind": "edit",
    "baseSha256": "fb7b64ecb07e5af832d2361fae4eba88af9d15f98d78e1798a8fb950b1b0c9e9",
-   "resultSha256": "911bccfb5413e10544a477f202227048c71a9397b10ba51cd0e26cf0e6f33a72",
+   "resultSha256": "a2a9d56f893858d5fea77ee4c93f352135d9dec747456cf0a4ed9d477f5eacf8",
    "hunks": [
     {
      "at": 6531,
@@ -161,6 +161,18 @@
       ],
       [
        "      \"file\": \"powertoys-assist.js\"\n"
+      ],
+      [
+       "    },\n"
+      ],
+      [
+       "    {\n"
+      ],
+      [
+       "      \"id\": \"powertoys/huddle\",\n"
+      ],
+      [
+       "      \"file\": \"powertoys-huddle.js\"\n"
       ]
      ]
     }
@@ -169,7 +181,7 @@
   {
    "path": "src/main.bundle.cjs/powertoys-ai.js",
    "kind": "add",
-   "sha256": "ff0f92c813578b0195bddecc0f62683f1fb91cbf6111ed0a39ef4026e9d57128"
+   "sha256": "75ad1cface0f9944f0c44b0c24bf6ece47c77bba2281d37d8698a6e2ef655f04"
   },
   {
    "path": "src/main.bundle.cjs/powertoys-assist.js",
@@ -179,7 +191,7 @@
   {
    "path": "src/main.bundle.cjs/powertoys-claude.js",
    "kind": "add",
-   "sha256": "7ec919c56d8349421be0bc11cea951099a12650009d132f298018ca54763e078"
+   "sha256": "81809415ea017b390cba713c436f7e7bd59cd3029e5486abed5c535e36b7006c"
   },
   {
    "path": "src/main.bundle.cjs/powertoys-dev.js",
@@ -187,9 +199,14 @@
    "sha256": "881518779ba5385e3f9748dfe89f2ebb94b85a2450d49ee45a6c4d3e4bab2c8c"
   },
   {
+   "path": "src/main.bundle.cjs/powertoys-huddle.js",
+   "kind": "add",
+   "sha256": "4d64c24e2bb2e9131a657364c29950f56097632e65264d6f649febaabdda515d"
+  },
+  {
    "path": "src/main.bundle.cjs/powertoys-main.js",
    "kind": "add",
-   "sha256": "fef6c59afc03bc8c2b2ee9d5c1c4b2240f10e153724c18d7f62435d633297f36"
+   "sha256": "a760e699fea8cebca78699f0545c641e6a47219ccac8d9ecc6199c7970251342"
   },
   {
    "path": "src/main.bundle.cjs/powertoys-notion.js",
@@ -293,7 +310,7 @@
   {
    "path": "src/preload.bundle.js/powertoys-page.js",
    "kind": "add",
-   "sha256": "0cb99c4274239473c91c41cb85b1821e522112c5d126159a3b844b9b4af1ea4f"
+   "sha256": "b05e340f437011ad275b3c90d41ddfbfdb242dd1350bd154286fd4d8645f09ce"
   }
  ]
 }

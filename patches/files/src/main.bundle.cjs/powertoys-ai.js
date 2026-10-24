@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------------------------
 // Powertoys (local addition): Claude for Powertoys' features, through the Claude Code CLI (`claude -p`), signed in as
 // you (no API key). A lean call: Powertoys' own system prompt, no tools unless a feature asks for read-only ones, no
-// MCP servers, no settings or CLAUDE.md files, nothing saved.
+// MCP servers, no settings or CLAUDE.md files, nothing saved. Or a prompt added to one of your Claude Code sessions.
 // Settings (settings.json): "ai": { "model": "sonnet", "fastModel": "haiku", "claudePath": null }
 // ---------------------------------------------------------------------------------------------
 (function (module, exports, __webpack_require__) {
@@ -42,6 +42,32 @@
   const slot = () => (running < 3 ? (running++, Promise.resolve()) : new Promise((resolve) => waiting.push(resolve)));
   const release = () => (waiting.length ? waiting.shift()() : running--);
 
+  /** Runs `claude <args>` with the prompt on stdin, in cwd -> its JSON result. */
+  function run(args, prompt, cwd, timeoutMs) {
+    return new Promise((resolve, reject) => {
+      const child = childProcess.spawn(claudePath(), args, { cwd: cwd && fs.existsSync(cwd) ? cwd : os.tmpdir(), windowsHide: true });
+      let out = "";
+      let err = "";
+      const timer = setTimeout(() => (child.kill(), reject(new Error("Claude took too long"))), timeoutMs);
+      child.stdout.on("data", (chunk) => (out += chunk));
+      child.stderr.on("data", (chunk) => (err += chunk));
+      child.on("error", (caught) => (clearTimeout(timer), reject(new Error(`could not start Claude: ${caught.message}`))));
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        if (code !== 0 && !out) return reject(new Error(err.trim().split("\n").pop() || `Claude exited with ${code}`));
+        let result;
+        try {
+          result = JSON.parse(out);
+        } catch {
+          return reject(new Error(`Claude's answer could not be read: ${out.slice(0, 200)}`));
+        }
+        if (result.is_error) reject(new Error(result.result || "Claude failed"));
+        else resolve(result);
+      });
+      child.stdin.end(prompt);
+    });
+  }
+
   /**
    * Ask Claude. { prompt, system?, fast?: true for the fast model, cwd?: a folder it may read (then the tools are
    * Read, Grep and Glob), json?: parse the answer as JSON, timeoutMs? } -> the answer text (or parsed JSON).
@@ -64,23 +90,7 @@
         "--system-prompt", json ? `${system}\nAnswer with JSON only, no code fence.` : system,
       ];
       const started = Date.now();
-      const output = await new Promise((resolve, reject) => {
-        const child = childProcess.spawn(claudePath(), args, { cwd: cwd && fs.existsSync(cwd) ? cwd : os.tmpdir(), windowsHide: true });
-        let out = "";
-        let err = "";
-        const timer = setTimeout(() => (child.kill(), reject(new Error("Claude took too long"))), timeoutMs);
-        child.stdout.on("data", (chunk) => (out += chunk));
-        child.stderr.on("data", (chunk) => (err += chunk));
-        child.on("error", (caught) => (clearTimeout(timer), reject(new Error(`could not start Claude: ${caught.message}`))));
-        child.on("close", (code) => {
-          clearTimeout(timer);
-          if (code !== 0 && !out) reject(new Error(err.trim().split("\n").pop() || `Claude exited with ${code}`));
-          else resolve(out);
-        });
-        child.stdin.end(prompt);
-      });
-      const result = JSON.parse(output);
-      if (result.is_error) throw new Error(result.result || "Claude failed");
+      const result = await run(args, prompt, cwd, timeoutMs);
       log(`ai: ${fast ? "fast" : "main"} model, ${Math.round((Date.now() - started) / 1000)}s, $${(result.total_cost_usd ?? 0).toFixed(4)}`);
       const text = String(result.result ?? "").trim();
       if (!json) return text;
@@ -93,6 +103,26 @@
     }
   }
 
+  /**
+   * Adds a prompt to one of your Claude Code sessions (`claude -p --resume`), with its own settings, model and tools,
+   * as if you had typed it there; the question and answer stay in the session. -> the answer text.
+   */
+  async function askSession({ sessionId, cwd, prompt, timeoutMs = 180000 }) {
+    await slot();
+    try {
+      const started = Date.now();
+      const result = await run(["-p", "--output-format", "json", "--resume", sessionId], prompt, cwd, timeoutMs);
+      log(`ai: session ${sessionId}, ${Math.round((Date.now() - started) / 1000)}s, $${(result.total_cost_usd ?? 0).toFixed(4)}`);
+      return String(result.result ?? "").trim();
+    } catch (caught) {
+      warn(`ai: session ${sessionId}: ${caught.message}`);
+      throw caught;
+    } finally {
+      release();
+    }
+  }
+
   exports.ask = ask;
+  exports.askSession = askSession;
   exports.claudePath = claudePath;
 });
