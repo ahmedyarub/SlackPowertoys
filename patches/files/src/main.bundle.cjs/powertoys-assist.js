@@ -355,6 +355,27 @@
     return { folder };
   }
 
+  // A thread as an issue ticket, by a Claude Code session in the workspace's folder (which knows how its tickets are
+  // made). The session reads the thread itself, through the slack-powertoys tools; this only says what to use.
+  function issueFromThread({ link, teamId }) {
+    const folder = folderOf(teamId);
+    if (!folder) throw new Error("this workspace has no folder linked (Claude Code needs one to know where its tickets go)");
+    openClaude(
+      `Create a ticket in Notion's Issues database (Issues & Sprints → Core DBs → Issues), the way tickets are made there, from this Slack thread: ${link}\n\n` +
+        "- Read it with the slack-powertoys tools: read_slack_thread (limit 200).\n" +
+        "- Its videos: get_slack_clip_transcript gives Slack's transcript. When Slack has none yet, request_slack_transcript " +
+        "and read it again a minute later.\n" +
+        "- Write the ticket from the messages and the transcripts. Look at a video only when they don't make the issue clear " +
+        "(when what is on screen matters: a UI problem, an error shown, a number on a chart): take frames at those moments " +
+        "(save_slack_file for the video, then ffmpeg -ss <seconds> -i <video> -frames:v 1 frame-<seconds>.png), look at them, and attach to the ticket only the ones " +
+        "that show the problem. Images attached in the thread: save_slack_file, and the same rule.\n" +
+        "- Then give me the ticket's link, and put it in a reply in the thread as a draft (create_slack_draft).",
+      folder,
+    );
+    log(`issue from a thread: Claude Code in ${folder}`);
+    return { folder };
+  }
+
   // --- Search ----------------------------------------------------------------------------------------------
   async function searchAll({ query, teamId }) {
     const [slack, notionResults, code] = await Promise.all([
@@ -495,6 +516,7 @@
     "resume-session": resumeSession,
     "answer-approval": answerApproval,
     "task-from-thread": taskFromThread,
+    "issue-from-thread": issueFromThread,
     search: searchAll,
     focus: setFocus,
     snippets: () => snippets(),

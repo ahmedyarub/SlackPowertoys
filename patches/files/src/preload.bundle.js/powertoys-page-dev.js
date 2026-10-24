@@ -2,8 +2,8 @@
 // Powertoys (local addition): developer features in Slack's page (started by powertoys/page). It only adds its own
 // elements after a message's text (cards, chips, a code toolbar); Slack's own nodes are left alone.
 //
-//   - Message menu: Draft a reply with Claude, Save to Notion, Make this a Claude Code task, Draft a postmortem in
-//     Notion (in incident channels), Watch this run (GitHub Actions links).
+//   - Message menu: Draft a reply with Claude, Save to Notion, Create an issue with Claude, Make this a Claude Code task,
+//     Draft a postmortem in Notion (in incident channels), Watch this run (GitHub Actions links).
 //   - Notion links: a preview card (title, path, status, assignees, last edit, first lines).
 //   - GitHub pull request, issue and Actions run links: a live card (state, checks, review, diff); "Ask Claude to review",
 //     "Watch".
@@ -92,6 +92,17 @@
           page.notice(`Saved to Notion, under ${created.place}.`, { label: "Open", run: () => window.open(created.url) });
         } catch (caught) {
           page.notice(`Couldn't save to Notion: ${page.reason(caught)}`);
+        }
+      },
+    });
+    page.addMessageMenuItem({
+      label: "Create an issue with Claude",
+      run: async ({ link, teamId }) => {
+        try {
+          const { folder } = await page.invoke("issue-from-thread", { link, teamId });
+          page.notice(`Opening Claude Code in ${folder} to write the ticket…`);
+        } catch (caught) {
+          page.notice(`Couldn't start the issue: ${page.reason(caught)}`);
         }
       },
     });

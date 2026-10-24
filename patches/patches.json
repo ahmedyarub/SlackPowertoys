@@ -9,7 +9,7 @@
   {
    "path": "mcp/slack-powertoys.mjs",
    "kind": "add",
-   "sha256": "328ba9c451d81f44cd99ad3e3cd9ea4abd652f6e5f1493b6f8dde70f46405c8d"
+   "sha256": "3f93133392bff5e629a758a1cc0a2f416e32c0c7fd5a3090c3920e62afbc41c0"
   },
   {
    "path": "src/main.bundle.cjs/33229-main/0037.js",
@@ -174,12 +174,12 @@
   {
    "path": "src/main.bundle.cjs/powertoys-assist.js",
    "kind": "add",
-   "sha256": "8391bf5f614d9d9bc6dce01ef07512d099c1cdb0ba1e93dbd95ee01f8365538a"
+   "sha256": "96f641e80c30f3acb40dbbbe37af843b5086a8d8f9acd83805bcffb8b2283c23"
   },
   {
    "path": "src/main.bundle.cjs/powertoys-claude.js",
    "kind": "add",
-   "sha256": "b37a5f892cbc041e6e746bd4b617c96a60ba7e98bcef0a4cc0f520f114cbeb42"
+   "sha256": "7ec919c56d8349421be0bc11cea951099a12650009d132f298018ca54763e078"
   },
   {
    "path": "src/main.bundle.cjs/powertoys-dev.js",
@@ -283,7 +283,7 @@
   {
    "path": "src/preload.bundle.js/powertoys-page-dev.js",
    "kind": "add",
-   "sha256": "ec44f5d6078dfd0c41b06934d98a166fd19a300a480aaa45ff48507d030776fc"
+   "sha256": "82f4ff6ebcad932e631500298f7f085ccac5e48d7369268fcc257b3791bc7acb"
   },
   {
    "path": "src/preload.bundle.js/powertoys-page-panel.js",

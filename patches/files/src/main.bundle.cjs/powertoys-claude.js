@@ -9,9 +9,10 @@
 //     status;
 //   - opens Claude from Slack: "Ask Claude" starts a chat, or a Claude Code session in the folder linked to the
 //     workspace (claude://code/new?folder=&q=, claude://claude.ai/new?q=);
-//   - offers a summary when a huddle you were in ends with a transcript.
+//   - offers a summary when a huddle you were in ends with a transcript;
+//   - asks Slack to transcribe each video or audio file posted (what "Generate transcript" does), so it is there.
 // Settings (settings.json): "bridge" (default true) and "claude":
-//   { "folders": { "<team id>": "<folder>" }, "huddleSummaries": true,
+//   { "folders": { "<team id>": "<folder>" }, "huddleSummaries": true, "autoTranscripts": true,
 //     "codeNotify": { "minMinutes": 5, "status": false, "workspace": null } }
 // ---------------------------------------------------------------------------------------------
 (function (module, exports, __webpack_require__) {
@@ -24,7 +25,7 @@
   const crypto = __webpack_require__(76982);
   const { log, warn, api, slackPage, signedInTeams, readSettings, updateSettings, powertoysDir } = __webpack_require__("powertoys/main");
 
-  const DEFAULTS = { folders: {}, huddleSummaries: true, codeNotify: { minMinutes: 5, status: false, workspace: null } };
+  const DEFAULTS = { folders: {}, huddleSummaries: true, autoTranscripts: true, codeNotify: { minMinutes: 5, status: false, workspace: null } };
   function settings() {
     const claude = readSettings().claude ?? {};
     return { ...DEFAULTS, ...claude, codeNotify: { ...DEFAULTS.codeNotify, ...claude.codeNotify } };
@@ -169,6 +170,7 @@
         id: file.id,
         name: file.title || file.name,
         type: isClip(file) ? "clip" : file.pretty_type || file.filetype,
+        mimetype: file.mimetype,
       })),
       replies: message.reply_count || undefined,
       huddle: message.subtype === "huddle_thread" ? message.room?.id : undefined,
@@ -386,6 +388,40 @@
     const files = ref.file ? [ref.file] : await clipsOfMessage(page, teams, ref);
     if (!files.length) throw new Error("that message has no video or audio clip");
     return { clips: await inOrder(files, (file) => clipTranscript(page, teams, file)) };
+  }
+
+  /** Asks Slack to transcribe a video or audio file (what its "Generate transcript" does) -> Slack's answer. */
+  async function requestTranscript({ clip }) {
+    const page = requirePage();
+    const ref = parseRef(clip);
+    if (!ref.file) throw new Error("expected a file link or a file id (F...)");
+    let lastError = "file_not_found";
+    for (const team of teamsInOrder(await signedInTeams(page), ref.host)) {
+      const result = await api(page, team, "files.retranscribe", { file_id: ref.file, reason: "generate-transcript" });
+      if (result.ok) return { file: ref.file, status: "requested" };
+      lastError = result.error;
+      if (result.error !== "file_not_found") break;
+    }
+    throw new Error(`Slack didn't start a transcript for ${ref.file} (${lastError})`);
+  }
+
+  /** A message's file (a clip's video, an image) saved as <to>.<its extension> -> the path. */
+  async function saveFile({ file: fileId, host, to }) {
+    const page = requirePage();
+    let lastError = "file_not_found";
+    for (const team of teamsInOrder(await signedInTeams(page), host)) {
+      const result = await api(page, team, "files.info", { file: fileId });
+      if (!result.ok) {
+        lastError = result.error;
+        continue;
+      }
+      const response = await page.session.fetch(result.file.url_private_download ?? result.file.url_private);
+      if (!response.ok) throw new Error(`file ${fileId} could not be downloaded (HTTP ${response.status})`);
+      const file = `${to}.${result.file.filetype || "bin"}`;
+      fs.writeFileSync(file, Buffer.from(await response.arrayBuffer()));
+      return file;
+    }
+    throw new Error(`file ${fileId} could not be read (${lastError})`);
   }
 
   /** The newest clips (video and audio), newest first. */
@@ -656,11 +692,45 @@
     setInterval(() => check().catch((caught) => warn(`huddle watch: ${caught.message}`)), 3 * 60 * 1000);
   }
 
+  // --- A transcript for each video or audio file posted ----------------------------------------------------
+  // Every 30 seconds, each workspace's files since the last look (files.list); those Slack has no transcript of get
+  // one requested, once each.
+  function watchNewMedia() {
+    const since = new Map(); // team id -> unix seconds
+    const requested = new Set();
+    const firstLook = Math.floor(Date.now() / 1000) - 3600;
+    const check = async () => {
+      const page = slackPage();
+      if (!page || !settings().autoTranscripts) return;
+      for (const team of await signedInTeams(page)) {
+        const now = Math.floor(Date.now() / 1000);
+        const result = await api(page, team, "files.list", { ts_from: since.get(team.id) ?? firstLook, count: 100 });
+        if (!result.ok) continue;
+        since.set(team.id, now - 60);
+        for (const file of result.files ?? []) {
+          if (!isClip(file) || file.transcription?.status !== "none" || requested.has(file.id)) continue;
+          requested.add(file.id);
+          const answer = await api(page, team, "files.retranscribe", { file_id: file.id, reason: "generate-transcript" });
+          log(`transcript of ${file.id} (${file.title || file.name}) ${answer.ok ? "requested" : `not requested: ${answer.error}`}`);
+        }
+      }
+    };
+    setInterval(() => check().catch((caught) => warn(`transcript watch: ${caught.message}`)), 30 * 1000);
+  }
+
   // --- The bridge ------------------------------------------------------------------------------------------
   const number = (value) => (value == null || value === "" ? undefined : Number(value));
   const ROUTES = {
     "GET /clips": (q) => listClips({ workspace: q.workspace, limit: Math.min(number(q.limit) ?? 20, 100) }),
     "GET /transcript": (q) => clipTranscripts({ clip: q.clip }),
+    "POST /transcript": (q, body) => requestTranscript({ clip: body.clip }),
+    "GET /file": async (q) => {
+      const ref = parseRef(q.file);
+      if (!ref.file) throw new Error("expected a file link or a file id (F...)");
+      const folder = q.folder || path.join(powertoysDir(), "files");
+      fs.mkdirSync(folder, { recursive: true });
+      return { path: await saveFile({ file: ref.file, host: ref.host, to: path.join(folder, ref.file) }) };
+    },
     "GET /thread": (q) => readThread({ link: q.link, limit: Math.min(number(q.limit) ?? 50, 200) }),
     "GET /unreads": (q) => unreads({ workspace: q.workspace, conversations: number(q.conversations), perConversation: number(q.perConversation) }),
     "GET /search": (q) => search({ query: q.query, workspace: q.workspace, count: Math.min(number(q.count) ?? 20, 100), sort: q.sort || "score" }),
@@ -720,7 +790,7 @@
   }
 
   // For powertoys/assist.
-  Object.assign(exports, { settings, requirePage, readThread, unreads, search, myMessages, createDraft, huddleTranscript, clipTranscripts, teamForFolder, remind, self, conversationName, userName, parseRef, permalink });
+  Object.assign(exports, { settings, requirePage, readThread, unreads, search, myMessages, createDraft, huddleTranscript, clipTranscripts, saveFile, teamForFolder, remind, self, conversationName, userName, parseRef, permalink });
 
   exports.start = function start() {
     if (readSettings().bridge) startBridge();
@@ -729,5 +799,6 @@
     electron.ipcMain.handle("powertoys:link-folder", (event, teamId) => linkFolder(event, teamId));
     electron.ipcMain.handle("powertoys:unlink-folder", (event, teamId) => unlinkFolder(teamId));
     watchHuddles();
+    watchNewMedia();
   };
 });

@@ -48,6 +48,8 @@ patches/files/...           files that are entirely new (written for Powertoys),
   | `list_slack_saved`, `list_slack_drafts` | your saved items ("Later") and unsent drafts |
   | `create_slack_draft` | puts a draft in a message box (or a thread's) for you to review and send; it never sends |
   | `get_slack_clip_transcript`, `list_slack_clips` | video and audio clips' transcripts ("View transcript") |
+  | `request_slack_transcript` | asks Slack to transcribe a video it has no transcript of ("Generate transcript") |
+  | `save_slack_file` | downloads a file shared in Slack (a video, an image) for Claude to look at |
   | `list_slack_huddles`, `get_slack_huddle_transcript` | huddles, and a huddle's transcript (who said what) with Slack's AI notes |
 
   Add it to Claude Desktop in `%APPDATA%\Claude\claude_desktop_config.json` and restart Claude Desktop:
@@ -64,6 +66,9 @@ patches/files/...           files that are entirely new (written for Powertoys),
   under `claude.folders`). Claude Code sessions started from that workspace open in that folder.
 - **Huddle summaries:** when a huddle you were in ends with a transcript, a notice offers "Summarize with Claude"
   (`"claude": {"huddleSummaries": false}` turns it off).
+- **A transcript for every video:** each video or audio file posted gets Slack's own transcript requested right away
+  (what "Generate transcript" does), so it is there when you need it (`"claude": {"autoTranscripts": false}` turns
+  it off).
 - **Claude Code tells you in Slack** when a long session finishes or a session needs you: add
   `mcp/claude-code-hook.mjs` to Claude Code's hooks (`UserPromptSubmit`, `Stop` and `Notification`, in
   `~/.claude/settings.json`; the file's header shows how). You get a Slackbot reminder (it notifies, unlike a
@@ -85,7 +90,8 @@ patches/files/...           files that are entirely new (written for Powertoys),
     run cards update live, with Ask Claude to review and Watch (a reminder when the run ends).
   - **Agents:** a panel (Ctrl+Alt+P) with your Claude Code sessions; a session's permission request can be allowed or
     denied from Slack (or with `y`/`n` in a thread of your DM, from your phone); **Make this a Claude Code task**
-    starts a session in the workspace's folder that drafts its result into the thread.
+    starts a session in the workspace's folder that drafts its result into the thread; **Create an issue with Claude**
+    has that session write a ticket from the thread, its videos' transcripts and, only when needed, frames from them.
   - **Focus mode** (do not disturb, with Claude letting urgent mentions through and a summary afterwards), **search**
     across Slack, Notion and your repositories, a **secret guard** before sending (API keys, tokens, private keys,
     `.env` lines; checked on your computer), and **snippets** (type `;;`, with `{{commits}}`, `{{date}}`,

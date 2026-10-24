@@ -89,13 +89,36 @@ const TOOLS = [
     name: "get_slack_clip_transcript",
     description:
       "The transcript of a Slack video or audio clip (what Slack shows under \"View transcript\"), with timestamps. " +
-      "Takes a link to the clip's message (Copy link), a file link, or a file id (F...).",
+      "Takes a link to the clip's message (Copy link), a file link, or a file id (F...). No transcript yet: request_slack_transcript.",
     inputSchema: {
       type: "object",
       properties: { clip: link("A Slack message link, file link or file id"), timestamps: { type: "boolean", description: "Start each line with its time (default true)" } },
       required: ["clip"],
     },
     run: async ({ clip, timestamps = true }) => formatClips(await bridge("GET", "transcript", { clip }), timestamps),
+  },
+  {
+    name: "request_slack_transcript",
+    description:
+      "Asks Slack to transcribe a video or audio file it has no transcript of (Slack's own \"Generate transcript\"; uploaded " +
+      "screen recordings often have none). It takes a minute or so: then read it with get_slack_clip_transcript. Takes a file link or a file id (F...).",
+    inputSchema: { type: "object", properties: { clip: link("A Slack file link or file id") }, required: ["clip"] },
+    run: async ({ clip }) => {
+      const { file } = await bridge("POST", "transcript", { clip });
+      return `Slack is transcribing ${file}. Read it with get_slack_clip_transcript in a minute or so.`;
+    },
+  },
+  {
+    name: "save_slack_file",
+    description:
+      "Downloads a file shared in Slack (a video clip, a screen recording, an image) and gives its path, to look at or process " +
+      "(frames from a video with ffmpeg). Takes a file link or a file id (F..., as read_slack_thread lists them).",
+    inputSchema: {
+      type: "object",
+      properties: { file: link("A Slack file link or file id"), folder: { type: "string", description: "The folder to save it in (default: Powertoys' files folder)" } },
+      required: ["file"],
+    },
+    run: async ({ file, folder }) => `Saved: ${(await bridge("GET", "file", { file, folder })).path}`,
   },
   {
     name: "list_slack_clips",
