@@ -2,9 +2,14 @@
  "app": "Slack 4.52.182 for Windows",
  "files": [
   {
-   "path": "mcp/slack-transcripts.mjs",
+   "path": "mcp/claude-code-hook.mjs",
    "kind": "add",
-   "sha256": "35fe9fd5ea9cb4ee25735f9126d26140ed6829b2e0a83a0da73923be120fcf1f"
+   "sha256": "9a4d316c10bf7a8c16ad1e239237ea2e09cd1722bfb1052f1b174c0c39aef835"
+  },
+  {
+   "path": "mcp/slack-powertoys.mjs",
+   "kind": "add",
+   "sha256": "328ba9c451d81f44cd99ad3e3cd9ea4abd652f6e5f1493b6f8dde70f46405c8d"
   },
   {
    "path": "src/main.bundle.cjs/33229-main/0037.js",
@@ -79,7 +84,7 @@
    "path": "src/main.bundle.cjs/_bundle.json",
    "kind": "edit",
    "baseSha256": "39bb845f334d9328e5d2d3630c6acb71aeee11a031e643d90471164f1d370e16",
-   "resultSha256": "a976b4065e3a87e8ad7471f78ce2eb1b72c0ebadcc3f20d0c83e0eea8efa4426",
+   "resultSha256": "2b4119ca5fa64fe2e744da60e9774d811081b832cbf1516b4a277d869af4e114",
    "hunks": [
     {
      "at": 3813,
@@ -96,15 +101,32 @@
       ],
       [
        "      \"file\": \"powertoys-main.js\"\n"
+      ],
+      [
+       "    },\n"
+      ],
+      [
+       "    {\n"
+      ],
+      [
+       "      \"id\": \"powertoys/claude\",\n"
+      ],
+      [
+       "      \"file\": \"powertoys-claude.js\"\n"
       ]
      ]
     }
    ]
   },
   {
+   "path": "src/main.bundle.cjs/powertoys-claude.js",
+   "kind": "add",
+   "sha256": "43bb4ebb80a2b84a807937e07edba9876f114a6c8c45d86ede3da4ed1814a3ce"
+  },
+  {
    "path": "src/main.bundle.cjs/powertoys-main.js",
    "kind": "add",
-   "sha256": "8d3d20b17016f37f58266d0e094c868f53656dcf0b47b1e58c2064bf74b8ce6d"
+   "sha256": "57088a9a8d1d3d57d891a0a466a60b9a1f447a510948f083a82ba9badc3a56c6"
   },
   {
    "path": "src/preload.bundle.js/_bundle.json",
@@ -152,7 +174,7 @@
   {
    "path": "src/preload.bundle.js/powertoys-page.js",
    "kind": "add",
-   "sha256": "a5df95e2e6c45d96df9104294c0b4006644b8bb5b17e7341c6634a89e05c2c07"
+   "sha256": "f74bf5281f04f81b98b8b1d96533c6e8c9563114122f38a641107a8b5747701b"
   }
  ]
 }

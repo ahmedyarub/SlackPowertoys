@@ -14,12 +14,14 @@ patches/patches.json        the patch manifest: every file, its hashes and its e
 patches/files/...           files that are entirely new (written for Powertoys), copied in as they are
 ```
 
-`patches/patches.json` lists 9 files:
+`patches/patches.json` lists 11 files:
 
-- **3 new files** (`"kind": "add"`), written for Powertoys:
+- **5 new files** (`"kind": "add"`), written for Powertoys:
   - `src/main.bundle.cjs/powertoys-main.js`: the main-process half (module id `"powertoys/main"`).
+  - `src/main.bundle.cjs/powertoys-claude.js`: Slack and Claude, in the main process (module id `"powertoys/claude"`).
   - `src/preload.bundle.js/powertoys-page.js`: the in-page half (module id `"powertoys/page"`).
-  - `mcp/slack-transcripts.mjs`: an MCP server for Claude Desktop (runs on its own with Node, outside Slack).
+  - `mcp/slack-powertoys.mjs`: an MCP server for Claude Desktop (runs on its own with Node, outside Slack).
+  - `mcp/claude-code-hook.mjs`: a Claude Code hook (runs on its own with Node).
 - **6 edits** (`"kind": "edit"`) to the app's own files: three one-line hooks (start the two halves, add the tray
   menu item), two manifest entries that add the new modules to their bundles, and a small change to Windows
   auto-start.
@@ -29,18 +31,42 @@ patches/files/...           files that are entirely new (written for Powertoys),
 - **Mark everything as read**, in every signed-in workspace (a tray menu item) or in one (right-click a workspace
   icon). It marks each channel, DM and group DM with unreads as read at its latest message, the same Web API calls
   Slack's own "Mark all as read" makes; Slack then updates its sidebar itself.
-- **Slack clip transcripts for Claude Desktop.** While Slack runs, Powertoys serves clip transcripts (what Slack shows
-  under "View transcript") on `127.0.0.1`, with a random port and a bearer token written to
-  `%APPDATA%Slackpowertoysridge.json` (removed when Slack quits; `{"bridge": false}` in `settings.json`
-  turns it off). `mcp/slack-transcripts.mjs` is a dependency-free MCP server over it, with two tools:
-  `get_slack_clip_transcript` (a message link, a file link or a file id) and `list_slack_clips`. Add it to Claude
-  Desktop in `%APPDATA%Claudeclaude_desktop_config.json` and restart Claude Desktop:
+- **Slack for Claude Desktop.** While Slack runs, Powertoys answers on `127.0.0.1`, with a random port and a bearer
+  token written to `%APPDATA%\Slack\powertoys\bridge.json` (removed when Slack quits; `{"bridge": false}` in
+  `settings.json` turns it off). It uses your own Slack session, so it sees what you see in Slack.
+  `mcp/slack-powertoys.mjs` is a dependency-free MCP server over it, with these tools:
+
+  | Tool | What it does |
+  |---|---|
+  | `read_slack_thread` | a message with its whole thread (or a channel's latest messages), from a link |
+  | `get_slack_unreads` | the conversations with unread messages, mentions first, and those messages |
+  | `search_slack` | Slack's message search (`from:`, `in:`, `before:`, ...) |
+  | `get_my_slack_messages` | your own latest messages, so replies can be drafted in your style |
+  | `list_slack_saved`, `list_slack_drafts` | your saved items ("Later") and unsent drafts |
+  | `create_slack_draft` | puts a draft in a message box (or a thread's) for you to review and send; it never sends |
+  | `get_slack_clip_transcript`, `list_slack_clips` | video and audio clips' transcripts ("View transcript") |
+  | `list_slack_huddles`, `get_slack_huddle_transcript` | huddles, and a huddle's transcript (who said what) with Slack's AI notes |
+
+  Add it to Claude Desktop in `%APPDATA%\Claude\claude_desktop_config.json` and restart Claude Desktop:
 
   ```json
   "mcpServers": {
-    "slack-transcripts": { "command": "C:/Program Files/nodejs/node.exe", "args": ["<your-copy>/mcp/slack-transcripts.mjs"] }
+    "slack-powertoys": { "command": "C:/Program Files/nodejs/node.exe", "args": ["<your-copy>/mcp/slack-powertoys.mjs"] }
   }
   ```
+- **Ask Claude about this**, in Slack's message menu (right-click a message, or its "More actions"): opens Claude
+  Desktop with the message's link and a prompt to read it (with its thread and any clip transcripts) through the tools
+  above. If the workspace is linked to a folder, it starts a Claude Code session in that folder; otherwise a chat.
+- **A folder per workspace:** right-click a workspace icon, "Link a folder for Claude…" (kept in `settings.json`
+  under `claude.folders`). Claude Code sessions started from that workspace open in that folder.
+- **Huddle summaries:** when a huddle you were in ends with a transcript, a notice offers "Summarize with Claude"
+  (`"claude": {"huddleSummaries": false}` turns it off).
+- **Claude Code tells you in Slack** when a long session finishes or a session needs you: add
+  `mcp/claude-code-hook.mjs` to Claude Code's hooks (`UserPromptSubmit`, `Stop` and `Notification`, in
+  `~/.claude/settings.json`; the file's header shows how). You get a Slackbot reminder (it notifies, unlike a
+  message to yourself) in the workspace linked to the session's folder. Settings under `claude.codeNotify`:
+  `minMinutes` (default 5), `status` (default false: also show "Claude Code: working on <folder>" as your Slack
+  status while a session works), `workspace` (a workspace id for folders that are not linked).
 - **Auto-start for a copy run from its own folder:** with no Squirrel launcher (`slack.exe`) one folder up, "Launch
   on login" registers the running executable itself.
 - **Mods:** CSS and JavaScript files in `%APPDATA%\Slack\powertoys\mods\` are inserted into, and run in, Slack's
@@ -91,7 +117,7 @@ node patcher/apply-patches.mjs patches <your-copy>           # apply
 ## How the package was checked
 
 1. **Applied to unmodified files, it reproduces the Powertoys build byte for byte.**
-2. **No line of the package repeats a line of the app (40 characters or more)**, except seven generic ones in the
-   two new modules: their module wrapper, `(function (module, exports, __webpack_require__) {`, and `require` calls of
-   the `electron`, `path`, `http` and `crypto` modules.
+2. **No line of the package repeats a line of the app (40 characters or more)**, except generic ones in the new
+   modules: their module wrapper, `(function (module, exports, __webpack_require__) {`, `require` calls of the
+   `electron`, `path`, `http` and `crypto` modules, and `return new Promise((resolve, reject) => {`.
 3. **Applying it twice is refused**, as is applying it to any other files.
