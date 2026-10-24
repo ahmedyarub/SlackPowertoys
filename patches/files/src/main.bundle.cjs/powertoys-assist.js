@@ -20,7 +20,7 @@
   const electron = __webpack_require__(84157);
   const fs = __webpack_require__(79896);
   const path = __webpack_require__(16928);
-  const { log, warn, readSettings, powertoysDir, api, slackPage, signedInTeams } = __webpack_require__("powertoys/main");
+  const { log, warn, readSettings, updateSettings, powertoysDir, api, slackPage, signedInTeams } = __webpack_require__("powertoys/main");
   const claude = __webpack_require__("powertoys/claude");
   const ai = __webpack_require__("powertoys/ai");
   const notion = __webpack_require__("powertoys/notion");
@@ -87,7 +87,7 @@
   }
 
   const needNotion = () => {
-    if (!notion.configured()) throw new Error('Notion is not set up: add "notion": { "token", "parentPage" } to Powertoys\' settings.json');
+    if (!notion.configured()) throw new Error("Notion is not set up: Powertoys panel (Ctrl+Alt+P), Settings");
   };
 
   async function threadToNotion({ link }) {
@@ -469,12 +469,25 @@
     focus: setFocus,
     snippets: () => snippets(),
     "fill-snippet": fillSnippet,
+    "notion-setup": notionSetup,
     settings: () => ({
       notion: notion.configured(),
+      notionParentPage: notion.settings().parentPage || null,
       incidentPattern: settingsOf("incidents", { channelPattern: "^(inc|incident)[-_]" }).channelPattern,
       focus: focus ? { on: true, until: focus.until } : { on: false },
     }),
   };
+
+  /** Saves Notion's token and parent page, only once Notion has accepted both. A blank token keeps the saved one. */
+  async function notionSetup({ token, parentPage }) {
+    token = token?.trim() || notion.settings().token;
+    if (!token) throw new Error("Paste the integration's secret first");
+    parentPage = parentPage?.trim() ?? "";
+    const checked = await notion.check({ token, parentPage });
+    updateSettings((current) => ({ ...current, notion: { ...current.notion, token, parentPage } }));
+    log(`Notion set up (workspace ${checked.workspace ?? "?"}, parent page "${checked.parentTitle}")`);
+    return checked;
+  }
 
   exports.start = function start(store) {
     appStore = store;

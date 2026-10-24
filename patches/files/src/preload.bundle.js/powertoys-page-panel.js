@@ -6,6 +6,7 @@
 //   Search   Slack, Notion and your repositories at once
 //   Focus    do not disturb for a while; Claude lets urgent mentions through; a summary when it ends
 //   Digest   what is unread, summarized by Claude
+//   Settings Notion's integration secret and the page new pages go under
 // Also: a Claude Code session's permission request (with "agents.remoteApprove" on) shows as Allow / Deny here.
 // ---------------------------------------------------------------------------------------------
 (function (module, exports, __webpack_require__) {
@@ -55,7 +56,7 @@
     const root = page.ui();
     panel = el("div", "panel");
     const head = el("div", "panel-head");
-    for (const [name, label] of [["agents", "Agents"], ["search", "Search"], ["focus", "Focus"], ["digest", "Digest"]]) {
+    for (const [name, label] of [["agents", "Agents"], ["search", "Search"], ["focus", "Focus"], ["digest", "Digest"], ["settings", "Settings"]]) {
       const button = el("button", `tab${tab === name ? " on" : ""}`, label);
       button.addEventListener("click", () => ((tab = name), toggle(true)));
       head.append(button);
@@ -66,7 +67,7 @@
     const body = el("div", "panel-body");
     panel.append(head, body);
     root.appendChild(panel);
-    ({ agents: renderAgents, search: renderSearch, focus: renderFocus, digest: renderDigest })[tab](body);
+    ({ agents: renderAgents, search: renderSearch, focus: renderFocus, digest: renderDigest, settings: renderSettings })[tab](body);
   }
 
   function renderAgents(body) {
@@ -169,6 +170,44 @@
       }
     });
     body.append(go, out);
+  }
+
+  /** Notion: the integration's secret and the page new pages go under; saved only once Notion accepts them. */
+  async function renderSettings(body) {
+    const current = await page.invoke("settings").catch(() => ({}));
+    const token = el("input");
+    token.type = "password";
+    token.autocomplete = "off";
+    token.placeholder = current.notion ? "Saved (paste a new secret to replace it)" : "Internal integration secret (ntn_…)";
+    const parent = el("input");
+    parent.placeholder = "Link to the Notion page new pages go under";
+    parent.value = current.notionParentPage ?? "";
+    const save = el("button", "act", "Check and save");
+    const status = el("div", "sub", current.notion ? "Notion is set up." : "");
+    save.addEventListener("click", async () => {
+      save.disabled = true;
+      status.textContent = "Checking with Notion…";
+      try {
+        const checked = await page.invoke("notion-setup", { token: token.value, parentPage: parent.value });
+        token.value = "";
+        token.placeholder = "Saved (paste a new secret to replace it)";
+        status.textContent = `Saved: ${checked.workspace ? `workspace ${checked.workspace}, ` : ""}new pages go under "${checked.parentTitle}".`;
+      } catch (caught) {
+        status.textContent = `Not saved: ${page.reason(caught)}`;
+      } finally {
+        save.disabled = false;
+      }
+    });
+    body.append(
+      el("div", "group", "Notion"),
+      el("div", "sub", "1. notion.so/my-integrations → New integration (internal) → copy its secret.\n2. On the page new pages should go under: ••• → Connections → add the integration.\n3. Paste both here."),
+      token,
+      el("div", "sub", " "),
+      parent,
+      save,
+      status,
+    );
+    body.querySelector(".sub").style.whiteSpace = "pre-line";
   }
 
   exports.start = function start(core) {

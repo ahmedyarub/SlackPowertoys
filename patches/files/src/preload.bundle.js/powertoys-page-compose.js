@@ -116,10 +116,19 @@
     }
   }
 
+  /** Text with line breaks, inserted line by line: Slack's editor makes a paragraph of each, and mangles "\n" in text. */
+  function insertLines(text) {
+    text.split("\n").forEach((line, i) => {
+      if (i) document.execCommand("insertParagraph", false);
+      if (line) document.execCommand("insertText", false, line);
+    });
+  }
+
   function replaceMessage(editor, text) {
     editor.focus();
     document.execCommand("selectAll", false);
-    document.execCommand("insertText", false, text);
+    document.execCommand("delete", false);
+    insertLines(text);
   }
 
   // --- Snippets --------------------------------------------------------------------------------------------
@@ -150,7 +159,7 @@
             text = text.replace(/\{\{date\}\}/g, new Date().toISOString().slice(0, 10));
           }
           editor.focus();
-          document.execCommand("insertText", false, text);
+          insertLines(text);
         },
       })),
     });

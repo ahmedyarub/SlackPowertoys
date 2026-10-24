@@ -13,9 +13,8 @@
   exports.settings = settings;
   exports.configured = () => Boolean(settings().token);
 
-  async function call(method, route, body) {
-    const { token } = settings();
-    if (!token) throw new Error('Notion is not set up: add "notion": { "token": ... } to Powertoys\' settings.json');
+  async function call(method, route, body, token = settings().token) {
+    if (!token) throw new Error("Notion is not set up: Powertoys panel (Ctrl+Alt+P), Settings");
     const response = await fetch(`${API}${route}`, {
       method,
       headers: { authorization: `Bearer ${token}`, "notion-version": "2022-06-28", "content-type": "application/json" },
@@ -53,11 +52,11 @@
     return value;
   }
 
-  async function object(id) {
+  async function object(id, token) {
     try {
-      return await call("GET", `/pages/${id}`);
+      return await call("GET", `/pages/${id}`, undefined, token);
     } catch (caught) {
-      if (caught.status === 404 || caught.code === "validation_error") return call("GET", `/databases/${id}`);
+      if (caught.status === 404 || caught.code === "validation_error") return call("GET", `/databases/${id}`, undefined, token);
       throw caught;
     }
   }
@@ -140,7 +139,7 @@
   /** A new page under settings.parentPage (a page, or a database: then a row) -> { id, url }. */
   async function createPage({ title, children = [] }) {
     const parentId = notionId(settings().parentPage);
-    if (!parentId) throw new Error('Notion: set "notion": { "parentPage": "<page link>" } in Powertoys\' settings.json (and share that page with the integration)');
+    if (!parentId) throw new Error("Notion: set the page new pages go under in the Powertoys panel (Ctrl+Alt+P), Settings");
     const parentObject = await object(parentId);
     let parent;
     let properties;
@@ -157,6 +156,22 @@
     return { id: page.id, url: page.url };
   }
   exports.createPage = createPage;
+
+  /** Checks a token and the page new pages go under, before they are saved -> { workspace, parentTitle }. */
+  async function check({ token, parentPage }) {
+    const bot = await call("GET", "/users/me", undefined, token);
+    const parentId = notionId(parentPage);
+    if (!parentId) throw new Error("Notion: that is not a link to a Notion page");
+    let parentObject;
+    try {
+      parentObject = await object(parentId, token);
+    } catch (caught) {
+      if (caught.status === 404) throw new Error("Notion: the integration can't see that page; on the page, ••• → Connections → add the integration");
+      throw caught;
+    }
+    return { workspace: bot.bot?.workspace_name ?? null, parentTitle: titleOf(parentObject) };
+  }
+  exports.check = check;
 
   /** Pages and databases whose title matches -> [{ title, url, icon, editedAt }]. */
   async function search(query, limit = 10) {
