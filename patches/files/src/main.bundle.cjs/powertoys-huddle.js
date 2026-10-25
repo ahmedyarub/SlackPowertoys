@@ -9,8 +9,8 @@
 //     stays there, with the answer), and the answer shows in a pop-up.
 // Each huddle is recorded to a file (the window, the call's sound, your microphone); when it ends, Slack asks whether
 // to keep it ("huddle": { "autoRecord": true, "recordingsFolder": "<folder>" }).
-// When an incoming huddle rings, the Bluetooth radio goes on and Windows connects your paired headphones
-// ("huddle": { "headphones": "AirPods" }, a part of their name; null: off).
+// When a huddle starts or rings, the Bluetooth radio goes on and Windows connects your paired headphones (the paired
+// device registered as headphones or a headset; "huddle": { "headphones": "<part of a name>" } picks one; null: off).
 // The scripts talk to the main process through tagged console messages; answers go back with executeJavaScript.
 // ---------------------------------------------------------------------------------------------
 (function (module, exports, __webpack_require__) {
@@ -544,40 +544,56 @@ if (-not $radio) { 'no-radio'; exit }
 if ($radio.State -ne 'On') { Await ($radio.SetStateAsync('On')) ([Windows.Devices.Radios.RadioAccessStatus]) | Out-Null; Start-Sleep -Seconds 2 }
 $selector = [Windows.Devices.Bluetooth.BluetoothDevice]::GetDeviceSelectorFromPairingState($true)
 $paired = Await ([Windows.Devices.Enumeration.DeviceInformation]::FindAllAsync($selector)) ([Windows.Devices.Enumeration.DeviceInformationCollection])
-$found = $paired | Where-Object { $_.Name -like "*$Name*" } | Select-Object -First 1
+$found = $null
+if ($Name) { $found = $paired | Where-Object { $_.Name -like "*$Name*" } | Select-Object -First 1 }
+if (-not $found) {
+  # The paired device Windows registered as headphones or a headset, whatever its name: its Bluetooth class (kept for
+  # each paired device) is Audio/Video, headsets, hands-free and headphones first.
+  $audio = foreach ($key in Get-ChildItem 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\BTHPORT\\Parameters\\Devices' -ErrorAction SilentlyContinue) {
+    $cod = (Get-ItemProperty $key.PSPath -Name COD -ErrorAction SilentlyContinue).COD
+    if ($cod -eq $null -or (($cod -shr 8) -band 0x1F) -ne 4) { continue }
+    $address = ($key.PSChildName -replace '(..)(?!$)', '$1:').ToLower()
+    $info = $paired | Where-Object { $_.Id.ToLower().EndsWith($address) } | Select-Object -First 1
+    if ($info) { [pscustomobject]@{ Info = $info; Minor = ($cod -shr 2) -band 0x3F } }
+  }
+  $found = ($audio | Sort-Object { if (@(1, 2, 6) -contains $_.Minor) { 0 } else { 1 } } | Select-Object -First 1).Info
+}
 if (-not $found) { 'not-paired'; exit }
 $device = Await ([Windows.Devices.Bluetooth.BluetoothDevice]::FromIdAsync($found.Id)) ([Windows.Devices.Bluetooth.BluetoothDevice])
+if ($device.ConnectionStatus -eq 'Connected') { "already $($found.Name)"; exit }
 for ($i = 0; $i -lt 10 -and $device.ConnectionStatus -ne 'Connected'; $i++) {
   Await ($device.GetRfcommServicesAsync([Windows.Devices.Bluetooth.BluetoothCacheMode]::Uncached)) ([Windows.Devices.Bluetooth.Rfcomm.RfcommDeviceServicesResult]) | Out-Null
   Start-Sleep -Seconds 2
 }
 if ($device.ConnectionStatus -eq 'Connected') { "connected $($found.Name)" } else { "not-connected $($found.Name)" }
 `;
+  // When a huddle starts (yours, one you join, or one ringing): "huddle": { "headphones": "" } picks the paired device
+  // Windows registered as headphones or a headset, whatever its name; a name picks that device; null turns it off.
   let connecting = false;
-  async function headphonesOn() {
-    const { headphones = "AirPods" } = readSettings().huddle ?? {};
-    if (!headphones || connecting) return;
+  async function headphonesOn(why) {
+    const { headphones = "" } = readSettings().huddle ?? {};
+    if (headphones === null || connecting) return;
     connecting = true;
     try {
       const script = path.join(os.tmpdir(), "powertoys-headphones.ps1");
       fs.writeFileSync(script, HEADPHONES_SCRIPT);
       const notice = (text) => slackPage()?.send("powertoys:notice", { text });
-      notice(`A huddle is ringing: Bluetooth on, looking for your ${headphones}…`);
       const output = await new Promise((resolve) =>
         __webpack_require__(35317).execFile(
           "powershell.exe",
-          ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-Name", headphones],
+          ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, ...(headphones ? ["-Name", headphones] : [])],
           { windowsHide: true, timeout: 60000 },
           (caught, stdout) => resolve(caught && !stdout ? `error ${caught.message}` : String(stdout).trim().split("\n").pop()),
         ),
       );
-      log(`huddle ringing: headphones ${output}`);
+      log(`huddle ${why}: headphones ${output}`);
       const [result, ...name] = output.split(" ");
+      if (result === "already") return;
       notice(
         {
-          connected: `${name.join(" ")} connected.`,
-          "not-connected": `${name.join(" ")} didn't connect: take them out of the case, or connect them in Windows' Bluetooth settings.`,
-          "not-paired": `No paired Bluetooth device named "${headphones}": pair them once in Windows' Bluetooth settings.`,
+          connected: `Bluetooth on; ${name.join(" ")} connected.`,
+          "not-connected": `Bluetooth on, but ${name.join(" ")} didn't connect: take them out of the case, or connect them in Windows' Bluetooth settings.`,
+          "not-paired": headphones ? `No paired Bluetooth device named "${headphones}".` : "No paired Bluetooth headphones: pair them once in Windows' Bluetooth settings.",
           "no-radio": "This computer has no Bluetooth radio Powertoys can turn on.",
         }[result] ?? `Couldn't turn on Bluetooth: ${output}`,
       );
@@ -619,7 +635,7 @@ if ($device.ConnectionStatus -eq 'Connected') { "connected $($found.Name)" } els
       } catch {
         return;
       }
-      if (message.type === "ringing") return headphonesOn().catch((caught) => warn(`headphones: ${caught.message}`));
+      if (message.type === "ringing") return headphonesOn("ringing").catch((caught) => warn(`headphones: ${caught.message}`));
       if (message.type === "huddle") return addClaude(contents).catch((caught) => warn(`huddle: ${caught.message}`));
       onMessage(contents, message).catch((caught) => warn(`huddle: ${caught.message}`));
     });
@@ -642,6 +658,7 @@ if ($device.ConnectionStatus -eq 'Connected') { "connected $($found.Name)" } els
     // The huddle window opens maximized.
     const huddleWindow = electron.BrowserWindow.fromWebContents(contents);
     if (huddleWindow && !huddleWindow.isMaximized()) huddleWindow.maximize();
+    headphonesOn("started").catch((caught) => warn(`headphones: ${caught.message}`));
     await contents.executeJavaScript(`(${huddleWindowScript.toString()})()`, true);
     log(`huddle window: Claude added (folder ${huddles.get(contents.id)?.folder ?? "none"})`);
     if (readSettings().huddle?.autoRecord !== false) startRecording(contents).catch((caught) => warn(`recording: ${caught.message}`));
