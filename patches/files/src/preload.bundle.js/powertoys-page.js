@@ -386,6 +386,25 @@
             for (const menu of menus) addMenuItems(menu);
           }
       }).observe(document.body, { childList: true, subtree: true });
+      // A huddle ringing or about to start in this window (an incoming huddle's card, or the screen before joining or
+      // starting one): Bluetooth and headphones on (powertoys/huddle; the same goes for the windows Slack opens).
+      let ringing = false;
+      new MutationObserver(() => {
+        const now = !!document.querySelector('.p-huddle_invite, [data-qa^="huddle_invite_window_with_preview"]');
+        if (now !== ringing) invoke(now ? "huddle-ringing" : "huddle-ring-ended").catch((caught) => log(`ringing: ${reason(caught)}`));
+        ringing = now;
+      }).observe(document.body, { childList: true, subtree: true });
+      // Cancel or Decline there: Bluetooth off at once.
+      document.addEventListener(
+        "click",
+        (event) => {
+          const button = event.target.closest?.("button, [role=button]");
+          if (!button || !ringing) return;
+          const qa = button.dataset?.qa ?? "";
+          if (/cancel|decline|dismiss/i.test(qa) || /^(cancel|decline|not now)$/i.test(button.textContent.trim())) invoke("huddle-cancelled").catch(() => {});
+        },
+        true,
+      );
       document.addEventListener("keydown", (event) => event.key === "Escape" && closeMenu(), true);
       log("page module started");
     });

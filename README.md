@@ -74,9 +74,10 @@ patches/files/...           files that are entirely new (written for Powertoys),
   "Claude session" dropdown in the captions panel picks one of your Claude Code sessions in the workspace's folder,
   or a new one (the default). Double-click a caption, select several and press **Ask Claude**, or right-click: the
   question is asked in that session (it stays there) by a fast model, and the answer shows in a pop-up you can drag
-  and type follow-up questions in. When a huddle starts or rings, Bluetooth goes on and Windows connects your paired
+  and type follow-up questions in. From the moment a huddle rings or its start screen opens, Bluetooth goes on and
+  Windows connects your paired
   headphones (found by their Bluetooth class, whatever their name; `"huddle": {"headphones": "<name>"}` picks a
-  device, `null` turns it off).
+  device, `null` turns it off). If Bluetooth was off, it goes off again when the huddle ends, or at Cancel/Decline.
 - **Recording every huddle:** the huddle window, the call's sound (Slack's only, no other app) and your microphone,
   encoded by your graphics card, to `.mkv` in `"huddle": {"recordingsFolder"}`. Written and flushed to disk every
   half second, kept in memory too, restarted in a new part if the recorder fails, finished before Slack quits and

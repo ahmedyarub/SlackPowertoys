@@ -9,7 +9,7 @@
   {
    "path": "mcp/slack-powertoys.mjs",
    "kind": "add",
-   "sha256": "de2fdcfbe148e8c19ee51b61081339ef0b7e2cbd92c464def85a9fb4ae623251"
+   "sha256": "80ec3f51a94addc06aa98787b2d9f871caf587f2e99911857981dbbe44119cd5"
   },
   {
    "path": "src/main.bundle.cjs/33229-main/0037.js",
@@ -201,7 +201,7 @@
   {
    "path": "src/main.bundle.cjs/powertoys-huddle.js",
    "kind": "add",
-   "sha256": "e99ab597e15cc9ba34497e811db109be594e198e65c066fa1f76ebe874d295d0"
+   "sha256": "0017264eda54ec3732d0fb32aa6042518dfdd1088aa0721f6d365c6bcb911fb5"
   },
   {
    "path": "src/main.bundle.cjs/powertoys-main.js",
@@ -310,7 +310,7 @@
   {
    "path": "src/preload.bundle.js/powertoys-page.js",
    "kind": "add",
-   "sha256": "dd1cc0bff204b43d476b0f05418cd58a8b74d650b583f6711f4e9039ccca7f5a"
+   "sha256": "bfe031b44d6f87a77564ab43cd3a5278be2f22839fc8fd8a3886e9f6c5d04ad6"
   }
  ]
 }

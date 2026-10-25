@@ -10,7 +10,8 @@
 // Each huddle is recorded to a file (the window, the call's sound, your microphone); when it ends, Slack asks whether
 // to keep it ("huddle": { "autoRecord": true, "recordingsFolder": "<folder>" }).
 // When a huddle starts or rings, the Bluetooth radio goes on and Windows connects your paired headphones (the paired
-// device registered as headphones or a headset; "huddle": { "headphones": "<part of a name>" } picks one; null: off).
+// device registered as headphones or a headset; "huddle": { "headphones": "<part of a name>" } picks one; null: off);
+// if Bluetooth was off, it goes off again when the huddle ends, at Cancel or Decline, or when a ring stops unanswered.
 // The scripts talk to the main process through tagged console messages; answers go back with executeJavaScript.
 // ---------------------------------------------------------------------------------------------
 (function (module, exports, __webpack_require__) {
@@ -541,7 +542,7 @@ function Await($op, [Type]$t) { $task = $asTask.MakeGenericMethod($t).Invoke($nu
 Await ([Windows.Devices.Radios.Radio]::RequestAccessAsync()) ([Windows.Devices.Radios.RadioAccessStatus]) | Out-Null
 $radio = (Await ([Windows.Devices.Radios.Radio]::GetRadiosAsync()) ([System.Collections.Generic.IReadOnlyList[Windows.Devices.Radios.Radio]])) | Where-Object { $_.Kind -eq 'Bluetooth' }
 if (-not $radio) { 'no-radio'; exit }
-if ($radio.State -ne 'On') { Await ($radio.SetStateAsync('On')) ([Windows.Devices.Radios.RadioAccessStatus]) | Out-Null; Start-Sleep -Seconds 2 }
+if ($radio.State -ne 'On') { 'radio-turned-on'; Await ($radio.SetStateAsync('On')) ([Windows.Devices.Radios.RadioAccessStatus]) | Out-Null; Start-Sleep -Seconds 2 }
 $selector = [Windows.Devices.Bluetooth.BluetoothDevice]::GetDeviceSelectorFromPairingState($true)
 $paired = Await ([Windows.Devices.Enumeration.DeviceInformation]::FindAllAsync($selector)) ([Windows.Devices.Enumeration.DeviceInformationCollection])
 $found = $null
@@ -570,6 +571,63 @@ if ($device.ConnectionStatus -eq 'Connected') { "connected $($found.Name)" } els
   // When a huddle starts (yours, one you join, or one ringing): "huddle": { "headphones": "" } picks the paired device
   // Windows registered as headphones or a headset, whatever its name; a name picks that device; null turns it off.
   let connecting = false;
+  // Bluetooth was off and Powertoys turned it on: it goes off again when the huddle ends (or the ringing stops
+  // without a huddle), once no huddle window is open.
+  // (Kept in powertoys\bluetooth.json, so a restart of Slack in between doesn't forget it.)
+  const bluetoothFile = () => path.join(powertoysDir(), "bluetooth.json");
+  let bluetoothOurs = (() => {
+    try {
+      return JSON.parse(fs.readFileSync(bluetoothFile(), "utf8")).turnedOnByPowertoys === true;
+    } catch {
+      return false;
+    }
+  })();
+  function setBluetoothOurs(value) {
+    bluetoothOurs = value;
+    try {
+      fs.writeFileSync(bluetoothFile(), JSON.stringify({ turnedOnByPowertoys: value, at: new Date().toISOString() }));
+    } catch (caught) {
+      warn(`bluetooth: ${caught.message}`);
+    }
+  }
+  let offWanted = null; // why Bluetooth should go off once the headphones step now running has finished
+  const BLUETOOTH_OFF_SCRIPT = `
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation\`1' })[0]
+function Await($op, [Type]$t) { $task = $asTask.MakeGenericMethod($t).Invoke($null, @($op)); $task.Wait() | Out-Null; $task.Result }
+[Windows.Devices.Radios.Radio,Windows.System.Devices,ContentType=WindowsRuntime] | Out-Null
+$radio = (Await ([Windows.Devices.Radios.Radio]::GetRadiosAsync()) ([System.Collections.Generic.IReadOnlyList[Windows.Devices.Radios.Radio]])) | Where-Object { $_.Kind -eq 'Bluetooth' }
+if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([Windows.Devices.Radios.RadioAccessStatus]) | Out-Null; 'off' } else { 'was-off' }
+`;
+  async function bluetoothOff(why) {
+    if (connecting) return void (offWanted = why);
+    if (!bluetoothOurs || huddles.size) return;
+    setBluetoothOurs(false);
+    const script = path.join(os.tmpdir(), "powertoys-bluetooth-off.ps1");
+    fs.writeFileSync(script, BLUETOOTH_OFF_SCRIPT);
+    const output = await new Promise((resolve) =>
+      __webpack_require__(35317).execFile("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script], { windowsHide: true, timeout: 30000 }, (caught, stdout) =>
+        resolve(caught && !stdout ? `error ${caught.message}` : String(stdout).trim()),
+      ),
+    );
+    log(`huddle ${why}: Bluetooth ${output}`);
+  }
+
+  /** An incoming huddle rings (in its invite window or in Slack's main window). */
+  function ringStarted() {
+    log("huddle ringing");
+    headphonesOn("ringing").catch((caught) => warn(`headphones: ${caught.message}`));
+  }
+  /** Cancel (before starting or joining) or Decline (an incoming huddle): Bluetooth off now. */
+  function ringCancelled() {
+    log("huddle cancelled");
+    bluetoothOff("cancelled").catch((caught) => warn(`bluetooth: ${caught.message}`));
+  }
+  /** The ringing stopped some other way: if no huddle started (missed), Bluetooth off again. */
+  function ringEnded() {
+    setTimeout(() => bluetoothOff("ring ended").catch((caught) => warn(`bluetooth: ${caught.message}`)), 15000);
+  }
+
   async function headphonesOn(why) {
     const { headphones = "" } = readSettings().huddle ?? {};
     if (headphones === null || connecting) return;
@@ -583,11 +641,13 @@ if ($device.ConnectionStatus -eq 'Connected') { "connected $($found.Name)" } els
           "powershell.exe",
           ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, ...(headphones ? ["-Name", headphones] : [])],
           { windowsHide: true, timeout: 60000 },
-          (caught, stdout) => resolve(caught && !stdout ? `error ${caught.message}` : String(stdout).trim().split("\n").pop()),
+          (caught, stdout) => resolve(caught && !stdout ? `error ${caught.message}` : String(stdout).trim()),
         ),
       );
-      log(`huddle ${why}: headphones ${output}`);
-      const [result, ...name] = output.split(" ");
+      const lines = output.split(/\r?\n/);
+      if (lines.includes("radio-turned-on")) setBluetoothOurs(true);
+      log(`huddle ${why}: headphones ${lines.at(-1)}${bluetoothOurs ? " (Bluetooth turned on by Powertoys)" : ""}`);
+      const [result, ...name] = lines.at(-1).split(" ");
       if (result === "already") return;
       notice(
         {
@@ -599,12 +659,17 @@ if ($device.ConnectionStatus -eq 'Connected') { "connected $($found.Name)" } els
       );
     } finally {
       connecting = false;
+      if (offWanted) {
+        const why = offWanted;
+        offWanted = null;
+        bluetoothOff(why).catch((caught) => warn(`bluetooth: ${caught.message}`));
+      }
     }
   }
 
   // --- Watching the windows Slack's page opens -----------------------------------------------------------------
-  // A small watcher in each: it says when the window shows a huddle (then the huddle script goes in) and when an
-  // incoming huddle rings (the invite window, .p-huddle_invite).
+  // A small watcher in each: it says when the window shows a huddle (then the huddle script goes in) and when a huddle
+  // rings or is about to start (an incoming huddle's card, or the screen before joining or starting one).
   function watcherScript() {
     if (window.__powertoysWatch) return true;
     window.__powertoysWatch = true;
@@ -616,12 +681,25 @@ if ($device.ConnectionStatus -eq 'Connected') { "connected $($found.Name)" } els
         huddle = true;
         send({ type: "huddle" });
       }
-      const now = !!document.querySelector(".p-huddle_invite");
+      // An incoming huddle's card, or the screen before joining or starting one (Slack's invite window with a preview).
+      const now = !!document.querySelector('.p-huddle_invite, [data-qa^="huddle_invite_window_with_preview"]');
       if (now && !ringing) send({ type: "ringing" });
+      if (!now && ringing) send({ type: "ring-ended" });
       ringing = now;
     };
     new MutationObserver(check).observe(document.documentElement, { childList: true, subtree: true });
     check();
+    // Cancel (the screen before starting or joining) or Decline (an incoming huddle).
+    document.addEventListener(
+      "click",
+      (event) => {
+        const button = event.target.closest?.("button, [role=button]");
+        if (!button || !ringing) return;
+        const qa = button.dataset?.qa ?? "";
+        if (/cancel|decline|dismiss/i.test(qa) || /^(cancel|decline|not now)$/i.test(button.textContent.trim())) send({ type: "cancelled" });
+      },
+      true,
+    );
     return true;
   }
 
@@ -635,13 +713,17 @@ if ($device.ConnectionStatus -eq 'Connected') { "connected $($found.Name)" } els
       } catch {
         return;
       }
-      if (message.type === "ringing") return headphonesOn("ringing").catch((caught) => warn(`headphones: ${caught.message}`));
+      if (message.type === "ringing") return ringStarted();
+      if (message.type === "ring-ended") return ringEnded();
+      if (message.type === "cancelled") return ringCancelled();
       if (message.type === "huddle") return addClaude(contents).catch((caught) => warn(`huddle: ${caught.message}`));
       onMessage(contents, message).catch((caught) => warn(`huddle: ${caught.message}`));
     });
     contents.once("destroyed", () => {
-      huddles.delete(contents.id);
+      const wasHuddle = huddles.delete(contents.id);
       stopRecording(contents, true).catch((caught) => warn(`recording: ${caught.message}`));
+      // The huddle ended (or the ringing window closed): Bluetooth off again if Powertoys turned it on.
+      setTimeout(() => bluetoothOff(wasHuddle ? "ended" : "window closed").catch((caught) => warn(`bluetooth: ${caught.message}`)), wasHuddle ? 3000 : 15000);
     });
     // The window is about:blank until Slack's page draws in it; the watcher goes in as soon as it can run.
     // (A window Slack's page opens says it is at the page's address from inside, so its main window is told apart
@@ -1164,6 +1246,9 @@ if ($device.ConnectionStatus -eq 'Connected') { "connected $($found.Name)" } els
       if (contents.getType() === "window") watchWindow(contents);
     });
     electron.ipcMain.handle("powertoys:recording", (event, request) => recordingOperation(request));
+    electron.ipcMain.handle("powertoys:huddle-ringing", () => ringStarted());
+    electron.ipcMain.handle("powertoys:huddle-ring-ended", () => ringEnded());
+    electron.ipcMain.handle("powertoys:huddle-cancelled", () => ringCancelled());
     electron.ipcMain.handle("powertoys:recordings", () => listRecordings());
     electron.ipcMain.handle("powertoys:recording-open", (event, request) => openRecordingFile(request));
     electron.app.on("before-quit", finishBeforeQuit);

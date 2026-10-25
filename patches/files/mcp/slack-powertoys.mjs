@@ -280,7 +280,7 @@ async function handle(message) {
       return {
         protocolVersion: message.params?.protocolVersion ?? "2025-06-18",
         capabilities: { tools: {} },
-        serverInfo: { name: "slack-powertoys", version: "1.1.0" },
+        serverInfo: { name: "slack-powertoys", version: "1.2.0" },
       };
     case "ping":
       return {};
