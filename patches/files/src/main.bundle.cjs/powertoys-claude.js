@@ -390,15 +390,37 @@
     return { clips: await inOrder(files, (file) => clipTranscript(page, teams, file)) };
   }
 
+  // The languages Slack transcribes in (its huddle language list); the one used is "transcripts": { "language" },
+  // set in the Powertoys panel's Settings tab, English (US) by default.
+  const TRANSCRIPT_LANGUAGES = {
+    "en-US": "English (US)",
+    "en-GB": "English (UK)",
+    "de-DE": "Deutsch (Deutschland)",
+    "es-ES": "Español (España)",
+    "es-LA": "Español (Latinoamérica)",
+    "fr-FR": "Français (France)",
+    "it-IT": "Italiano (Italia)",
+    "pt-BR": "Português (Brasil)",
+    "ja-JP": "日本語",
+    "ko-KR": "한국어",
+    "zh-CN": "简体中文",
+    "zh-TW": "繁體中文",
+  };
+  const transcriptLanguage = () => {
+    const language = readSettings().transcripts?.language;
+    return language in TRANSCRIPT_LANGUAGES ? language : "en-US";
+  };
+
   /** Asks Slack to transcribe a video or audio file (what its "Generate transcript" does) -> Slack's answer. */
-  async function requestTranscript({ clip }) {
+  async function requestTranscript({ clip, language = transcriptLanguage() }) {
+    if (!(language in TRANSCRIPT_LANGUAGES)) throw new Error(`Slack doesn't transcribe in "${language}"; one of ${Object.keys(TRANSCRIPT_LANGUAGES).join(", ")}`);
     const page = requirePage();
     const ref = parseRef(clip);
     if (!ref.file) throw new Error("expected a file link or a file id (F...)");
     let lastError = "file_not_found";
     for (const team of teamsInOrder(await signedInTeams(page), ref.host)) {
-      const result = await api(page, team, "files.retranscribe", { file_id: ref.file, reason: "generate-transcript" });
-      if (result.ok) return { file: ref.file, status: "requested" };
+      const result = await api(page, team, "files.retranscribe", { file_id: ref.file, locale: language, reason: "generate-transcript" });
+      if (result.ok) return { file: ref.file, status: "requested", language };
       lastError = result.error;
       if (result.error !== "file_not_found") break;
     }
@@ -711,7 +733,7 @@
         for (const file of result.files ?? []) {
           if (!isClip(file) || file.transcription?.status !== "none" || requested.has(file.id)) continue;
           requested.add(file.id);
-          const answer = await api(page, team, "files.retranscribe", { file_id: file.id, reason: "generate-transcript" });
+          const answer = await api(page, team, "files.retranscribe", { file_id: file.id, locale: transcriptLanguage(), reason: "generate-transcript" });
           log(`transcript of ${file.id} (${file.title || file.name}) ${answer.ok ? "requested" : `not requested: ${answer.error}`}`);
         }
       }
@@ -724,7 +746,7 @@
   const ROUTES = {
     "GET /clips": (q) => listClips({ workspace: q.workspace, limit: Math.min(number(q.limit) ?? 20, 100) }),
     "GET /transcript": (q) => clipTranscripts({ clip: q.clip }),
-    "POST /transcript": (q, body) => requestTranscript({ clip: body.clip }),
+    "POST /transcript": (q, body) => requestTranscript({ clip: body.clip, language: body.language || undefined }),
     "GET /file": async (q) => {
       const ref = parseRef(q.file);
       if (!ref.file) throw new Error("expected a file link or a file id (F...)");
@@ -791,7 +813,7 @@
   }
 
   // For powertoys/assist.
-  Object.assign(exports, { settings, requirePage, readThread, unreads, search, myMessages, createDraft, huddleTranscript, clipTranscripts, saveFile, teamForFolder, remind, self, conversationName, userName, parseRef, permalink });
+  Object.assign(exports, { settings, requirePage, readThread, unreads, search, myMessages, createDraft, huddleTranscript, clipTranscripts, saveFile, TRANSCRIPT_LANGUAGES, transcriptLanguage, requestTranscript, teamForFolder, remind, self, conversationName, userName, parseRef, permalink });
 
   exports.start = function start() {
     if (readSettings().bridge) startBridge();

@@ -63,29 +63,58 @@
     host?.shadowRoot.querySelector(".menu")?.remove();
   }
 
-  /** A short notice; with an action, a button (and a close button) that stays a minute. */
-  function notice(text, action = null) {
+  /** A short notice; with actions (one or a list), buttons (and a close button) that stay a minute, or `ms`. */
+  function notice(text, action = null, ms = null) {
     const root = ui();
     root.querySelector(".notice")?.remove();
     const node = document.createElement("div");
     node.className = "notice";
     node.append(text);
-    if (action) {
+    const actions = [].concat(action ?? []);
+    for (const each of actions) {
       const button = document.createElement("button");
-      button.textContent = action.label;
-      button.addEventListener("click", () => (node.remove(), action.run()));
+      button.textContent = each.label;
+      button.addEventListener("click", () => (node.remove(), each.run()));
+      node.append(button);
+    }
+    if (actions.length) {
       const close = document.createElement("button");
       close.className = "close";
       close.textContent = "×";
       close.title = "Close";
       close.addEventListener("click", () => node.remove());
-      node.append(button, close);
+      node.append(close);
     }
     root.appendChild(node);
-    setTimeout(() => node.remove(), action ? 60000 : 4000);
+    setTimeout(() => node.remove(), ms ?? (actions.length ? 60000 : 4000));
   }
 
   const reason = (caught) => caught.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+
+  /** What can be done with a huddle's recording (powertoys/huddle): transcribe, summarize, save, delete. */
+  function recordingActions(base) {
+    const open = (file) => invoke("recording-open", { base, file }).catch((caught) => notice(reason(caught)));
+    return [
+      {
+        label: "Transcribe",
+        run: () =>
+          invoke("recording", { base, op: "transcribe" }).then(
+            ({ file }) => notice("Transcript saved beside the recording.", { label: "Open", run: () => open(file) }),
+            (caught) => notice(`Couldn't transcribe: ${reason(caught)}`),
+          ),
+      },
+      {
+        label: "Summarize",
+        run: () =>
+          invoke("recording", { base, op: "summarize" }).then(
+            ({ file, text }) => popover({ title: "The huddle, summarized", text, markdown: true, actions: [{ label: "Open the file", run: () => open(file) }] }),
+            (caught) => notice(`Couldn't summarize: ${reason(caught)}`),
+          ),
+      },
+      { label: "Save", run: () => invoke("recording", { base, op: "save" }).then(() => notice("Recording saved.")) },
+      { label: "Delete", run: () => invoke("recording", { base, op: "delete" }).then(() => notice("Recording moved to the Recycle Bin.")) },
+    ];
+  }
 
   async function markAllRead(teamId, where) {
     notice(`Marking everything as read ${where}…`);
@@ -207,7 +236,43 @@
   exports.addMessageMenuItem({ label: "Ask Claude about this", run: ({ link, teamId }) => askClaude({ link, teamId, kind: "message" }) });
 
   // --- A pop-over for longer answers (Claude's explanations, digests, check results) -----------------------
-  function popover({ title, text, actions = [], x = null, y = null }) {
+  /** Claude's Markdown as page elements (headings, lists, bold, code), built node by node: no HTML from the text. */
+  function renderMarkdown(text) {
+    const fragment = document.createDocumentFragment();
+    const inline = (parent, line) => {
+      for (const piece of line.split(/(\*\*[^*]+\*\*|`[^`]+`)/)) {
+        if (/^\*\*[^*]+\*\*$/.test(piece)) parent.append(Object.assign(document.createElement("strong"), { textContent: piece.slice(2, -2) }));
+        else if (/^`[^`]+`$/.test(piece)) parent.append(Object.assign(document.createElement("code"), { textContent: piece.slice(1, -1) }));
+        else if (piece) parent.append(piece);
+      }
+    };
+    let list = null;
+    for (const line of text.split("\n")) {
+      const heading = /^#{1,6}\s+(.*)$/.exec(line);
+      const item = /^\s*(?:[-*]|\d+\.)\s+(.*)$/.exec(line);
+      if (item) {
+        if (!list) fragment.append((list = document.createElement(/^\s*\d/.test(line) ? "ol" : "ul")));
+        const li = document.createElement("li");
+        inline(li, item[1].replace(/^\[[ x]\]\s*/i, ""));
+        list.append(li);
+        continue;
+      }
+      list = null;
+      if (heading) {
+        const node = document.createElement("div");
+        node.className = "md-heading";
+        inline(node, heading[1]);
+        fragment.append(node);
+      } else if (line.trim()) {
+        const node = document.createElement("p");
+        inline(node, line);
+        fragment.append(node);
+      }
+    }
+    return fragment;
+  }
+
+  function popover({ title, text, actions = [], x = null, y = null, markdown = false }) {
     const root = ui();
     root.querySelector(".popover")?.remove();
     const box = document.createElement("div");
@@ -222,7 +287,8 @@
     head.appendChild(close);
     const body = document.createElement("div");
     body.className = "popover-body";
-    body.textContent = text;
+    if (markdown) body.append(renderMarkdown(text));
+    else body.textContent = text;
     box.append(head, body);
     if (actions.length) {
       const row = document.createElement("div");
@@ -242,7 +308,7 @@
       box.style.top = `${Math.max(8, Math.min(y, innerHeight - rect.height - 8))}px`;
       box.style.transform = "none";
     }
-    return { box, body, setText: (value) => (body.textContent = value) };
+    return { box, body, setText: (value) => (body.textContent = value), setMarkdown: (value) => body.replaceChildren(renderMarkdown(value)) };
   }
 
   const POPOVER_STYLE = `
@@ -253,6 +319,12 @@
         border-bottom: 1px solid rgba(255,255,255,.1); }
       .popover-close { background: none; border: 0; color: #d1d2d3; font-size: 18px; cursor: pointer; }
       .popover-body { padding: 12px 14px; overflow: auto; white-space: pre-wrap; }
+      .popover-body:has(.md-heading, p, ul, ol) { white-space: normal; }
+      .popover-body .md-heading { font-weight: 700; margin: 10px 0 4px; }
+      .popover-body .md-heading:first-child { margin-top: 0; }
+      .popover-body p { margin: 0 0 6px; }
+      .popover-body ul, .popover-body ol { margin: 0 0 8px; padding-left: 20px; }
+      .popover-body code { font-family: Consolas, monospace; background: rgba(255,255,255,.08); padding: 0 3px; border-radius: 3px; }
       .popover-actions { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid rgba(255,255,255,.1); }
       .popover-actions button { font: inherit; font-weight: 700; color: #fff; background: #007a5a; border: 0; border-radius: 4px;
         padding: 5px 12px; cursor: pointer; }
@@ -260,13 +332,22 @@
 
   const invoke = (name, request) => electron.ipcRenderer.invoke(`powertoys:${name}`, request);
   const currentTeamId = () => /\/client\/([A-Z0-9]+)/.exec(location.pathname)?.[1] ?? null;
-  Object.assign(exports, { ui, notice, popover, invoke, reason, workspaceOf, currentTeamId, log, on: (channel, fn) => electron.ipcRenderer.on(channel, (event, payload) => fn(payload)) });
+  Object.assign(exports, { ui, notice, popover, renderMarkdown, invoke, reason, recordingActions, workspaceOf, currentTeamId, log, on: (channel, fn) => electron.ipcRenderer.on(channel, (event, payload) => fn(payload)) });
 
   const PAGE_STYLE = ".powertoys-menu-item button:hover, .powertoys-menu-item button:focus { background: #1264a3; color: #fff; }";
   const PAGE_MODULES = ["powertoys/page-dev", "powertoys/page-compose", "powertoys/page-panel"];
 
   exports.start = function start(store) {
     electron.ipcRenderer.on("powertoys:notice", (event, { text }) => notice(text));
+    // A huddle's recording, when the huddle ends: keep it (and show it) or delete it; kept unless you say otherwise.
+    electron.ipcRenderer.on("powertoys:recording-done", (event, { base, parts, where, minutes, recovered }) =>
+      notice(
+        `${recovered ? "Recovered an unfinished recording of" : "Recorded"} the huddle${where ? ` in ${where}` : ""}` +
+          `${recovered ? "" : ` (${minutes} min)`}${parts > 1 ? `, in ${parts} parts` : ""}.`,
+        recordingActions(base),
+        10 * 60000,
+      ),
+    );
     electron.ipcRenderer.on("powertoys:huddle-ended", (event, { teamId, link, where }) =>
       notice(`A huddle in ${where} ended with a transcript.`, { label: "Summarize with Claude", run: () => askClaude({ link, teamId, kind: "huddle" }) }),
     );

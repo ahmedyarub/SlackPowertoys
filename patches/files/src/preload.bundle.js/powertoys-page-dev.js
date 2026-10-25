@@ -288,7 +288,7 @@
       explainButton.remove();
       const shown = page.popover({ title: "Claude explains", text: "Thinking…" });
       try {
-        shown.setText(await page.invoke("explain", { text, teamId: page.currentTeamId() }));
+        shown.setMarkdown(await page.invoke("explain", { text, teamId: page.currentTeamId() }));
       } catch (caught) {
         shown.setText(`Couldn't explain: ${page.reason(caught)}`);
       }

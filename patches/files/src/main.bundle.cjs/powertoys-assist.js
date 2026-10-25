@@ -523,10 +523,18 @@
     "fill-snippet": fillSnippet,
     "notion-setup": notionSetup,
     "notion-sign-in": notionSignIn,
+    "transcript-language": ({ language }) => {
+      if (!(language in claude.TRANSCRIPT_LANGUAGES)) throw new Error(`not a language Slack transcribes in: ${language}`);
+      updateSettings((current) => ({ ...current, transcripts: { ...current.transcripts, language } }));
+      log(`transcripts in ${language}`);
+      return { language };
+    },
     settings: () => ({
       notion: notion.configured(),
       notionClientId: notion.settings().clientId || null,
       notionRedirectUri: notion.redirectUri,
+      transcriptLanguage: claude.transcriptLanguage(),
+      transcriptLanguages: claude.TRANSCRIPT_LANGUAGES,
       incidentPattern: settingsOf("incidents", { channelPattern: "^(inc|incident)[-_]" }).channelPattern,
       focus: focus ? { on: true, until: focus.until } : { on: false },
     }),

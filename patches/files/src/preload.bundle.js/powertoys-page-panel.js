@@ -6,7 +6,8 @@
 //   Search   Slack, Notion and your repositories at once
 //   Focus    do not disturb for a while; Claude lets urgent mentions through; a summary when it ends
 //   Digest   what is unread, summarized by Claude
-//   Settings Notion: sign in (OAuth connection) or an internal integration's secret
+//   Recordings  the huddles recorded: open, transcribe (Slack), summarize (Claude), delete
+//   Settings the transcription language; Notion: sign in (OAuth connection) or an internal integration's secret
 // Also: a Claude Code session's permission request (with "agents.remoteApprove" on) shows as Allow / Deny here.
 // ---------------------------------------------------------------------------------------------
 (function (module, exports, __webpack_require__) {
@@ -34,7 +35,12 @@
     .panel-body button.act { font: inherit; font-weight: 700; color: #fff; background: #007a5a; border: 0; border-radius: 4px; padding: 4px 10px; cursor: pointer; margin-top: 6px; }
     .panel-body .link { color: #1d9bd1; cursor: pointer; }
     .state-working { color: #ecb22e; } .state-idle { color: #2eb67d; } .state-needs { color: #e01e5a; }
-    .panel-body pre { white-space: pre-wrap; font: inherit; margin: 0; }`;
+    .panel-body pre { white-space: pre-wrap; font: inherit; margin: 0; }
+    .panel-body label { display: block; margin: 4px 0; font-weight: 700; }
+    .panel-body .md-heading { font-weight: 700; margin: 10px 0 4px; }
+    .panel-body p { margin: 0 0 6px; }
+    .panel-body ul, .panel-body ol { margin: 0 0 8px; padding-left: 20px; }
+    .panel-body select:focus-visible, .panel-body input:focus-visible, .panel-body button:focus-visible { outline: 2px solid #1d9bd1; outline-offset: 1px; }`;
 
   function el(tag, className, text) {
     const node = document.createElement(tag);
@@ -56,7 +62,7 @@
     const root = page.ui();
     panel = el("div", "panel");
     const head = el("div", "panel-head");
-    for (const [name, label] of [["agents", "Agents"], ["search", "Search"], ["focus", "Focus"], ["digest", "Digest"], ["settings", "Settings"]]) {
+    for (const [name, label] of [["agents", "Agents"], ["search", "Search"], ["focus", "Focus"], ["digest", "Digest"], ["recordings", "Recordings"], ["settings", "Settings"]]) {
       const button = el("button", `tab${tab === name ? " on" : ""}`, label);
       button.addEventListener("click", () => ((tab = name), toggle(true)));
       head.append(button);
@@ -67,7 +73,7 @@
     const body = el("div", "panel-body");
     panel.append(head, body);
     root.appendChild(panel);
-    ({ agents: renderAgents, search: renderSearch, focus: renderFocus, digest: renderDigest, settings: renderSettings })[tab](body);
+    ({ agents: renderAgents, search: renderSearch, focus: renderFocus, digest: renderDigest, recordings: renderRecordings, settings: renderSettings })[tab](body);
   }
 
   function renderAgents(body) {
@@ -140,7 +146,7 @@
       end.addEventListener("click", async () => {
         end.textContent = "Summarizing…";
         const result = await page.invoke("focus", { on: false }).catch((caught) => ({ summary: page.reason(caught) }));
-        body.replaceChildren(el("pre", "", result.summary ?? "Focus mode ended."));
+        body.replaceChildren(page.renderMarkdown(result.summary ?? "Focus mode ended."));
       });
       body.append(end);
       return;
@@ -157,12 +163,12 @@
 
   function renderDigest(body) {
     const go = el("button", "act", "Summarize what is unread");
-    const out = el("pre");
+    const out = el("div");
     go.addEventListener("click", async () => {
       go.disabled = true;
       out.textContent = "Reading and summarizing…";
       try {
-        out.textContent = (await page.invoke("digest")).text;
+        out.replaceChildren(page.renderMarkdown((await page.invoke("digest")).text));
       } catch (caught) {
         out.textContent = `Couldn't make the digest: ${page.reason(caught)}`;
       } finally {
@@ -170,6 +176,41 @@
       }
     });
     body.append(go, out);
+  }
+
+  /** The recorded huddles, newest first, each with what can be done with it. */
+  async function renderRecordings(body) {
+    let list;
+    try {
+      list = await page.invoke("recordings");
+    } catch (caught) {
+      return body.append(el("div", "sub", `Couldn't list the recordings: ${page.reason(caught)}`));
+    }
+    if (!list.length) return body.append(el("div", "sub", "No recordings yet. Each huddle is recorded; you choose what to keep when it ends."));
+    for (const recording of list) {
+      const row = el("div", "row");
+      row.append(
+        el("div", "", `${recording.where ?? "Huddle"}`),
+        el("div", "sub", `${new Date(recording.since).toLocaleString()} · ${recording.megabytes} MB${recording.parts.length > 1 ? ` · ${recording.parts.length} parts` : ""}`),
+      );
+      const buttons = el("div");
+      const button = (label, run) => {
+        const node = el("button", "act", label);
+        node.style.marginRight = "6px";
+        node.addEventListener("click", run);
+        buttons.append(node);
+      };
+      const open = (file) => page.invoke("recording-open", { base: recording.base, file }).catch((caught) => page.notice(page.reason(caught)));
+      button("Play", () => open(recording.parts[0]));
+      if (recording.transcript) button("Transcript", () => open(`${recording.base}.transcript.txt`));
+      if (recording.summary) button("Summary", () => open(`${recording.base}.summary.md`));
+      for (const action of page.recordingActions(recording.base).filter((each) => each.label !== "Save")) {
+        if ((action.label === "Transcribe" && recording.transcript) || (action.label === "Summarize" && recording.summary)) continue;
+        button(action.label, () => Promise.resolve(action.run()).finally(() => setTimeout(() => tab === "recordings" && toggle(true), 500)));
+      }
+      row.append(buttons);
+      body.append(row);
+    }
   }
 
   /** Notion: sign in with a public (OAuth) connection, or an internal integration's secret; saved only once Notion accepts it. */
@@ -208,7 +249,34 @@
     const save = el("button", "act", "Check and save");
     save.addEventListener("click", () => run(save, "notion-setup", () => ({ token: token.value }), [token]));
 
+    // Transcription language: a native select with its label, a description and a spoken confirmation.
+    const heading = (text) => Object.assign(el("div", "group", text), { role: "heading" }, { ariaLevel: "3" });
+    const languageLabel = Object.assign(el("label", "", "Transcription language"), { htmlFor: "powertoys-transcript-language" });
+    const language = Object.assign(el("select"), { id: "powertoys-transcript-language" });
+    language.setAttribute("aria-describedby", "powertoys-transcript-language-help");
+    for (const [code, name] of Object.entries(current.transcriptLanguages ?? { "en-US": "English (US)" })) {
+      language.append(Object.assign(el("option", "", name), { value: code, lang: code, selected: code === (current.transcriptLanguage ?? "en-US") }));
+    }
+    const languageHelp = Object.assign(el("div", "sub", "The language Slack transcribes videos, recordings and audio clips in, when Powertoys or Claude asks it to."), {
+      id: "powertoys-transcript-language-help",
+    });
+    const languageStatus = Object.assign(el("div", "sub"), { role: "status" });
+    languageStatus.setAttribute("aria-live", "polite");
+    language.addEventListener("change", async () => {
+      try {
+        await page.invoke("transcript-language", { language: language.value });
+        languageStatus.textContent = `Saved: transcripts in ${language.selectedOptions[0].textContent}.`;
+      } catch (caught) {
+        languageStatus.textContent = `Not saved: ${page.reason(caught)}`;
+      }
+    });
+
     body.append(
+      heading("Transcription"),
+      languageLabel,
+      language,
+      languageHelp,
+      languageStatus,
       el("div", "group", "Notion: sign in (OAuth connection)"),
       steps(`notion.so/profile/integrations → New connection → OAuth, redirect URI ${current.notionRedirectUri ?? ""} → copy its client ID and secret. When Notion asks, pick the pages Powertoys may use; Claude puts each new page where it fits among them.`),
       clientId,
@@ -240,7 +308,7 @@
         ],
       });
     });
-    page.on("powertoys:focus-summary", ({ summary }) => summary && page.popover({ title: "While you were focused", text: summary }));
+    page.on("powertoys:focus-summary", ({ summary }) => summary && page.popover({ title: "While you were focused", text: summary, markdown: true }));
     page.on("powertoys:open-link", ({ link }) => openLink(link));
     page.invoke("agents").then((list) => (agents = list)).catch(() => {});
     document.addEventListener(

@@ -70,10 +70,19 @@ patches/files/...           files that are entirely new (written for Powertoys),
 - **A transcript for every video:** each video or audio file posted gets Slack's own transcript requested right away
   (what "Generate transcript" does), so it is there when you need it (`"claude": {"autoTranscripts": false}` turns
   it off).
-- **Huddles:** captions show side by side instead of the huddle's thread; a faint "Claude" chip in the huddle window
-  picks one of your Claude Code sessions in the workspace's folder; right-click a caption, **Ask Claude**, and the
-  question is asked in that session (it stays there) with a quick answer in a pop-up. When a huddle rings, Bluetooth
-  goes on and Windows connects your paired headphones (`"huddle": {"headphones": "AirPods"}`; `null` turns it off).
+- **Huddles:** the huddle window opens maximized with captions side by side instead of the huddle's thread. A
+  "Claude session" dropdown in the captions panel picks one of your Claude Code sessions in the workspace's folder,
+  or a new one (the default). Double-click a caption, select several and press **Ask Claude**, or right-click: the
+  question is asked in that session (it stays there) by a fast model, and the answer shows in a pop-up you can drag
+  and type follow-up questions in. When a huddle rings, Bluetooth goes on and Windows connects your paired headphones
+  (`"huddle": {"headphones": "AirPods"}`; `null` turns it off).
+- **Recording every huddle:** the huddle window, the call's sound (Slack's only, no other app) and your microphone,
+  encoded by your graphics card, to `.mkv` in `"huddle": {"recordingsFolder"}`. Written and flushed to disk every
+  half second, kept in memory too, restarted in a new part if the recorder fails, finished before Slack quits and
+  recovered after a crash. When the huddle ends: **Transcribe** (Slack's own transcription, via a private upload),
+  **Summarize** (Claude), **Save** or **Delete** (Recycle Bin); also in the panel's Recordings tab.
+  `"huddle": {"autoRecord": false}` turns it off. You are responsible for telling the people on the call.
+- **Transcription language:** a dropdown in the panel's Settings tab (English by default) for every transcript.
 - **Claude Code tells you in Slack** when a long session finishes or a session needs you: add
   `mcp/claude-code-hook.mjs` to Claude Code's hooks (`UserPromptSubmit`, `Stop` and `Notification`, in
   `~/.claude/settings.json`; the file's header shows how). You get a Slackbot reminder (it notifies, unlike a

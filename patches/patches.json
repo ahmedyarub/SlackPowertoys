@@ -9,7 +9,7 @@
   {
    "path": "mcp/slack-powertoys.mjs",
    "kind": "add",
-   "sha256": "3f93133392bff5e629a758a1cc0a2f416e32c0c7fd5a3090c3920e62afbc41c0"
+   "sha256": "de2fdcfbe148e8c19ee51b61081339ef0b7e2cbd92c464def85a9fb4ae623251"
   },
   {
    "path": "src/main.bundle.cjs/33229-main/0037.js",
@@ -181,17 +181,17 @@
   {
    "path": "src/main.bundle.cjs/powertoys-ai.js",
    "kind": "add",
-   "sha256": "75ad1cface0f9944f0c44b0c24bf6ece47c77bba2281d37d8698a6e2ef655f04"
+   "sha256": "8a574583c3897e41437b4d9dafe612f76f6b6e388c4af6c3e6b9f17d3d8dd8e4"
   },
   {
    "path": "src/main.bundle.cjs/powertoys-assist.js",
    "kind": "add",
-   "sha256": "96f641e80c30f3acb40dbbbe37af843b5086a8d8f9acd83805bcffb8b2283c23"
+   "sha256": "d92dbece92ad00424e9d8994abbef53badec20a89959626de87308fcbf219efb"
   },
   {
    "path": "src/main.bundle.cjs/powertoys-claude.js",
    "kind": "add",
-   "sha256": "81809415ea017b390cba713c436f7e7bd59cd3029e5486abed5c535e36b7006c"
+   "sha256": "c1bc5782e158e0510722408a5da47e402b231b222ef0c4749431b2f7616cb30d"
   },
   {
    "path": "src/main.bundle.cjs/powertoys-dev.js",
@@ -201,7 +201,7 @@
   {
    "path": "src/main.bundle.cjs/powertoys-huddle.js",
    "kind": "add",
-   "sha256": "4d64c24e2bb2e9131a657364c29950f56097632e65264d6f649febaabdda515d"
+   "sha256": "ec4aa15b66162471a92d08bb3279210a1728b5a6d11f33821dd967acc240e682"
   },
   {
    "path": "src/main.bundle.cjs/powertoys-main.js",
@@ -300,17 +300,17 @@
   {
    "path": "src/preload.bundle.js/powertoys-page-dev.js",
    "kind": "add",
-   "sha256": "82f4ff6ebcad932e631500298f7f085ccac5e48d7369268fcc257b3791bc7acb"
+   "sha256": "ed45124167d985e1f86ee6e0ca0c8068b2f746b517ad88351d3ed7da5ca77472"
   },
   {
    "path": "src/preload.bundle.js/powertoys-page-panel.js",
    "kind": "add",
-   "sha256": "87c4e5393c5d3d2ea4ac6eb37aa37d21f99b84bee2036de0e62ebe3da65ff490"
+   "sha256": "fdb1cd312765f0211ec86fdf476fe0bfdd0b66a839d037f9e8fd2fcc5e1c091a"
   },
   {
    "path": "src/preload.bundle.js/powertoys-page.js",
    "kind": "add",
-   "sha256": "b05e340f437011ad275b3c90d41ddfbfdb242dd1350bd154286fd4d8645f09ce"
+   "sha256": "dd1cc0bff204b43d476b0f05418cd58a8b74d650b583f6711f4e9039ccca7f5a"
   }
  ]
 }

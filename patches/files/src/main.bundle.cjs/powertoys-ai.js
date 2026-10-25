@@ -104,15 +104,21 @@
   }
 
   /**
-   * Adds a prompt to one of your Claude Code sessions (`claude -p --resume`), with its own settings, model and tools,
-   * as if you had typed it there; the question and answer stay in the session. -> the answer text.
+   * Adds a prompt to one of your Claude Code sessions (`claude -p --resume`), with its own settings and tools (and its
+   * model, unless `model` says otherwise), as if you had typed it there; the question and answer stay in the session.
+   * -> the answer text.
    */
-  async function askSession({ sessionId, cwd, prompt, timeoutMs = 180000 }) {
+  const sessionCosts = new Map(); // session id -> its running total, as last reported
+  async function askSession({ sessionId, cwd, prompt, model = null, timeoutMs = 180000 }) {
     await slot();
     try {
       const started = Date.now();
-      const result = await run(["-p", "--output-format", "json", "--resume", sessionId], prompt, cwd, timeoutMs);
-      log(`ai: session ${sessionId}, ${Math.round((Date.now() - started) / 1000)}s, $${(result.total_cost_usd ?? 0).toFixed(4)}`);
+      const result = await run(["-p", "--output-format", "json", "--resume", sessionId, ...(model ? ["--model", model] : [])], prompt, cwd, timeoutMs);
+      // A resumed session reports its running total; the difference is what this prompt cost.
+      const total = result.total_cost_usd ?? 0;
+      const cost = sessionCosts.has(sessionId) ? total - sessionCosts.get(sessionId) : null;
+      sessionCosts.set(sessionId, total);
+      log(`ai: session ${sessionId}${model ? ` (${model})` : ""}, ${Math.round((Date.now() - started) / 1000)}s, ${cost === null ? `session total $${total.toFixed(4)}` : `$${cost.toFixed(4)}`}`);
       return String(result.result ?? "").trim();
     } catch (caught) {
       warn(`ai: session ${sessionId}: ${caught.message}`);
@@ -122,7 +128,25 @@
     }
   }
 
+  /** Starts a Claude Code session in cwd with a prompt (saved like any session, with your settings) -> { text, sessionId }. */
+  async function askNew({ cwd, prompt, model = null, timeoutMs = 180000 }) {
+    await slot();
+    try {
+      const started = Date.now();
+      const result = await run(["-p", "--output-format", "json", ...(model ? ["--model", model] : [])], prompt, cwd, timeoutMs);
+      log(`ai: new session ${result.session_id}${model ? ` (${model})` : ""}, ${Math.round((Date.now() - started) / 1000)}s, $${(result.total_cost_usd ?? 0).toFixed(4)}`);
+      return { text: String(result.result ?? "").trim(), sessionId: result.session_id };
+    } catch (caught) {
+      warn(`ai: new session: ${caught.message}`);
+      throw caught;
+    } finally {
+      release();
+    }
+  }
+
   exports.ask = ask;
+  exports.askNew = askNew;
   exports.askSession = askSession;
   exports.claudePath = claudePath;
+  exports.fastModel = () => settings().fastModel;
 });

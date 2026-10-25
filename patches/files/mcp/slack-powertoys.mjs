@@ -102,10 +102,21 @@ const TOOLS = [
     description:
       "Asks Slack to transcribe a video or audio file it has no transcript of (Slack's own \"Generate transcript\"; uploaded " +
       "screen recordings often have none). It takes a minute or so: then read it with get_slack_clip_transcript. Takes a file link or a file id (F...).",
-    inputSchema: { type: "object", properties: { clip: link("A Slack file link or file id") }, required: ["clip"] },
-    run: async ({ clip }) => {
-      const { file } = await bridge("POST", "transcript", { clip });
-      return `Slack is transcribing ${file}. Read it with get_slack_clip_transcript in a minute or so.`;
+    inputSchema: {
+      type: "object",
+      properties: {
+        clip: link("A Slack file link or file id"),
+        language: {
+          type: "string",
+          enum: ["en-US", "en-GB", "de-DE", "es-ES", "es-LA", "fr-FR", "it-IT", "pt-BR", "ja-JP", "ko-KR", "zh-CN", "zh-TW"],
+          description: "The language spoken in it (default: the one chosen in Slack Powertoys' settings, English unless changed)",
+        },
+      },
+      required: ["clip"],
+    },
+    run: async ({ clip, language }) => {
+      const { file, language: used } = await bridge("POST", "transcript", { clip, language });
+      return `Slack is transcribing ${file} (${used}). Read it with get_slack_clip_transcript in a minute or so.`;
     },
   },
   {
