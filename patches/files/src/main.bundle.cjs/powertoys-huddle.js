@@ -970,7 +970,9 @@ if ($device.ConnectionStatus -eq 'Connected') { "connected $($found.Name)" } els
         }
         if (saved.status !== "recording" && saved.status !== "stopped") continue;
         if (!(saved.since < startedAt) || live.has(path.resolve(json.slice(0, -".json".length)))) continue;
-        const recording = { ...saved, base: json.slice(0, -".json".length), parts: (saved.parts ?? []).filter((file) => fs.existsSync(file) && fs.statSync(file).size > 0), recovered: true };
+        // A part a dying recorder started without writing anything holds nothing: it goes.
+        for (const file of saved.parts ?? []) if (fs.existsSync(file) && fs.statSync(file).size === 0) fs.rmSync(file);
+        const recording = { ...saved, base: json.slice(0, -".json".length), parts: (saved.parts ?? []).filter((file) => fs.existsSync(file)), recovered: true };
         log(`recording recovered: ${recording.parts.join(", ")}`);
         await finish(recording);
       }
@@ -1081,7 +1083,9 @@ if ($device.ConnectionStatus -eq 'Connected') { "connected $($found.Name)" } els
       return { ok: true };
     }
     if (op === "delete") {
-      const files = [...recording.parts, `${base}.transcript.txt`, `${base}.summary.md`, `${base}.json`];
+      // Every file of the recording: its parts, transcript, summary and status file.
+      const name = path.basename(base);
+      const files = fs.readdirSync(path.dirname(base)).filter((each) => each === `${name}.json` || each.startsWith(`${name}.`) || each.startsWith(`${name} (part `)).map((each) => path.join(path.dirname(base), each));
       for (const file of files) if (fs.existsSync(file)) await electron.shell.trashItem(file);
       log(`recording moved to the Recycle Bin: ${base}`);
       return { ok: true };

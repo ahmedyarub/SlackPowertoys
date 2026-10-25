@@ -201,7 +201,7 @@
   {
    "path": "src/main.bundle.cjs/powertoys-huddle.js",
    "kind": "add",
-   "sha256": "ec4aa15b66162471a92d08bb3279210a1728b5a6d11f33821dd967acc240e682"
+   "sha256": "406e2e27aad71d0e102dc520fc717ef8fa6c064a765dcb0468f5e8dd7d875bb3"
   },
   {
    "path": "src/main.bundle.cjs/powertoys-main.js",
