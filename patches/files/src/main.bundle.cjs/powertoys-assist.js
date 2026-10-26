@@ -56,6 +56,45 @@
     return electron.shell.openExternal(url);
   }
 
+  // --- Sharing a video posted in Slack with Claude ---------------------------------------------------------
+  /**
+   * Like sharing a recording: a Claude Code session (the workspace's linked folder, else Powertoys' folder) gets the
+   * video's Slack transcript attached (an @ mention of a file saved under powertoys\transcripts; Slack is asked for
+   * one and waited on, up to 3 minutes, if there's none yet) and the video only by its link, to save with
+   * slack-powertoys' save_slack_file and look at only when the transcript isn't enough.
+   */
+  async function shareClip({ link, teamId }) {
+    let { clips } = await claude.clipTranscripts({ clip: link });
+    const missing = clips.filter((clip) => !clip.lines.length);
+    if (missing.length) {
+      send("powertoys:notice", { text: "Asking Slack for the video's transcript…" });
+      for (const clip of missing) await claude.requestTranscript({ clip: clip.id }).catch((caught) => warn(`share clip: ${caught.message}`));
+      for (let waited = 0; waited < 180 && clips.some((clip) => !clip.lines.length); waited += 5) {
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        ({ clips } = await claude.clipTranscripts({ clip: link }));
+      }
+      if (clips.some((clip) => !clip.lines.length)) throw new Error("Slack has no transcript for the video yet; try again in a few minutes");
+    }
+    const folder = path.join(powertoysDir(), "transcripts");
+    fs.mkdirSync(folder, { recursive: true });
+    const clock = (ms) => `${String(Math.floor(ms / 60000)).padStart(2, "0")}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
+    const transcripts = clips.map((clip) => {
+      const file = path.join(folder, `${clip.id} ${String(clip.title).replace(/[\\/:*?"<>|]/g, "_").slice(0, 80)}.transcript.txt`);
+      fs.writeFileSync(file, `${clip.title}, by ${clip.author}, ${clip.created}\n\n${clip.lines.map((line) => `[${clock(line.start)}] ${line.text}`).join("\n")}\n`);
+      return { clip, file };
+    });
+    const prompt =
+      `A ${clips.length > 1 ? "message with videos" : "video"} was posted in Slack: ${link}\n\n` +
+      transcripts.map(({ clip, file }) => `"${clip.title}" (${clip.kind}, by ${clip.author}): transcript attached: @"${file}"; the ${clip.kind} itself: ${clip.permalink}`).join("\n") +
+      "\n\nWork from the transcript. Only when the transcript isn't enough for something (what was on screen, or speech it got wrong), " +
+      "save the video with slack-powertoys' save_slack_file and look at it, only at the parts you need.\n\n" +
+      "Tell me in a few lines what it is about, then wait for my questions.";
+    const where = folderOf(teamId) ?? powertoysDir();
+    await openClaude(prompt, where);
+    log(`shared ${clips.length} clip${clips.length === 1 ? "" : "s"} with Claude (a Code session in ${where})`);
+    return { folder: where };
+  }
+
   // --- Opening a Slack link in the app ---------------------------------------------------------------------
   // Slack's own deep links (slack://channel?team=&id=&message=), handed to its store as the app does with the ones it
   // is opened with (HANDLE_DEEP_LINK): the web app goes there without reloading.
@@ -521,6 +560,7 @@
     "answer-approval": answerApproval,
     "task-from-thread": taskFromThread,
     "issue-from-thread": issueFromThread,
+    "share-clip": shareClip,
     search: searchAll,
     focus: setFocus,
     snippets: () => snippets(),

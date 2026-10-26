@@ -111,6 +111,9 @@ patches/files/...           files that are entirely new (written for Powertoys),
     with your connection keeps its link and a notice says why. **Save to Notion** in the message menu (a thread, huddle or
     clip, summarized with decisions and action items); **Draft a postmortem in Notion** in incident channels. Claude
     picks where each new page goes (an Incidents database for a postmortem, say) among the pages you shared.
+  - **Share video with Claude** in the message menu of a message with a video or audio clip: a new Claude Code
+    session gets its Slack transcript attached and the video only by its link, to look at only when the transcript
+    isn't enough.
   - **Claude in Slack:** a catch-up digest (tray, panel, or daily); **Explain** for selected text; **Draft a reply with
     Claude** (in your style, as a draft, never sent); **Ctrl+Shift+K** checks a message for unclear asks, missing
     context and tone.

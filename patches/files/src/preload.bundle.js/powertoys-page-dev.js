@@ -95,6 +95,19 @@
         }
       },
     });
+    // A message with a video or audio clip: its transcript attached, the video only by its link.
+    page.addMessageMenuItem({
+      label: "Share video with Claude",
+      show: ({ element }) => !!element.querySelector('video, audio, [data-qa*="video"], [data-qa*="audio"], [data-qa*="clip"], [data-qa*="media_player"]'),
+      run: async ({ link, teamId }) => {
+        try {
+          const { folder } = await page.invoke("share-clip", { link, teamId });
+          page.notice(`Opening Claude Code in ${folder} with the transcript…`);
+        } catch (caught) {
+          page.notice(`Couldn't share it with Claude: ${page.reason(caught)}`);
+        }
+      },
+    });
     page.addMessageMenuItem({
       label: "Create an issue with Claude",
       run: async ({ link, teamId }) => {
