@@ -2,7 +2,7 @@
 // Powertoys (local addition): huddles and Claude. Slack draws a huddle's window itself (an about:blank window its page
 // opened), so Powertoys adds a script to it once the huddle shows there:
 //   - the window opens maximized, and its side panel shows Captions rather than the huddle's Thread; captions are
-//     side-by-side only (the "Show captions" menu), never the closed-caption overlay;
+//     side-by-side only, never the closed-caption overlay (set through Slack's own state: powertoys/page-slack);
 //   - a "Claude session" dropdown, always in view (in the Captions list's header), picks one of the Claude Code
 //     sessions of the workspace's folder (Claude Desktop's or the CLI's, worktrees included, from ~/.claude/projects),
 //     or "(New session)", the default, started with the first question;
@@ -421,71 +421,9 @@
       ask(openTalk(x, y, chosen), question);
     }
 
-    // Captions rather than the Thread in the side panel, once, when the huddle starts.
-    let tabbed = false;
-    const started = Date.now();
-    const pickCaptions = () => {
-      if (tabbed || Date.now() - started > 60000) return;
-      const tabs = [...document.querySelectorAll('[data-qa="tabs_item"]')];
-      const captions = tabs.find((tab) => tab.textContent.trim() === "Captions");
-      if (!captions) return;
-      tabbed = true;
-      if (captions.getAttribute("aria-selected") !== "true") captions.click();
-    };
-    new MutationObserver(pickCaptions).observe(document.body, { childList: true, subtree: true });
-    pickCaptions();
+    // The Captions tab and side-by-side captions (not the overlay) are set through Slack's own state, from its page
+    // (powertoys/page-slack): nothing here clicks Slack's tabs or menus.
 
-    // Side-by-side captions only, never the closed-caption overlay: once the huddle's menu is there, its "Show
-    // captions" submenu (two check items) is set, each item clicked only if it is wrong; checked again a little later,
-    // as captions turning on by default can come after. The menu opens and closes in a moment; never while one is open.
-    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-    const captionItem = (label) =>
-      [...document.querySelectorAll('[data-qa="huddle_sidebar_footer_buttons_feedback_menu"]')].find((item) => item.innerText.trim() === label);
-    async function captionsSubmenu() {
-      document.querySelector('[data-qa="huddle_toolbar_menu_button"]').click();
-      await wait(500);
-      const show = [...document.querySelectorAll('[role="menuitem"]')].find((item) => item.innerText.trim() === "Show captions");
-      if (!show) return false;
-      show.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
-      show.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
-      show.click();
-      await wait(600);
-      return true;
-    }
-    const closeMenus = () => document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, bubbles: true }));
-    async function setCaption(label, on) {
-      if (!(await captionsSubmenu())) return closeMenus(), `no "Show captions"`;
-      const item = captionItem(label);
-      const was = item?.getAttribute("aria-checked") === "true";
-      if (item && was !== on) item.click();
-      await wait(300);
-      if (document.querySelector('[role="menu"]')) closeMenus();
-      await wait(300);
-      return !item ? `no "${label}"` : was === on ? `${label} already ${on ? "on" : "off"}` : `${label} turned ${on ? "on" : "off"}`;
-    }
-    let settingCaptions = false;
-    async function captionsSideBySideOnly() {
-      if (settingCaptions || !document.querySelector('[data-qa="huddle_toolbar_menu_button"]') || document.querySelector('[role="menu"]')) return false;
-      settingCaptions = true;
-      try {
-        const results = [await setCaption("Side-by-side", true), await setCaption("Closed captions", false)];
-        send({ type: "log", text: `captions: ${results.join("; ")}` });
-      } catch (caught) {
-        send({ type: "log", text: `captions: ${caught.message}` });
-      } finally {
-        settingCaptions = false;
-      }
-      return true;
-    }
-    const captionsTimer = setInterval(async () => {
-      if (await captionsSideBySideOnly()) {
-        clearInterval(captionsTimer);
-        setTimeout(captionsSideBySideOnly, 15000);
-      }
-    }, 3000);
-
-    // Every caption line, with who said it and when it first showed, for the recording's speaker-named transcript
-    // (sent again while Slack corrects a line's words).
     // The side-by-side list when it shows, else the overlay: when the list replaces the overlay it shows the same lines
     // again (new elements), so a line already seen (same speaker, same words) keeps its first id and time.
     const captions = new WeakMap(); // line element -> { id, name, text, at }

@@ -128,7 +128,7 @@ patches/files/...           files that are entirely new (written for Powertoys),
     has that session write a ticket from the thread, its videos' transcripts and, only when needed, frames from them.
   - **Focus mode** (do not disturb, with Claude letting urgent mentions through and a summary afterwards), **search**
     across Slack, Notion and your repositories, a **secret guard** before sending (API keys, tokens, private keys,
-    `.env` lines; checked on your computer), and **snippets** (type `;;`, with `{{commits}}`, `{{date}}`,
+    `.env` lines; checked on your computer; Redact, or Send anyway, after which your own Enter sends it), and **snippets** (type `;;`, with `{{commits}}`, `{{date}}`,
     `{{ai: ...}}`).
 - **Edited and deleted messages keep a copy:** a deleted message stays where it was, dimmed and marked "Deleted" (until
   Slack reloads that conversation); an edited message gets "earlier version" next to Slack's "(edited)". Every copy is

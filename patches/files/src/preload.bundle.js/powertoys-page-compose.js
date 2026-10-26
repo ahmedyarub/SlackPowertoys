@@ -104,10 +104,15 @@
     return found;
   }
 
-  let bypass = false;
-  function guard(event, editor, resend) {
-    if (bypass) return false;
-    const found = findSecrets(editor.innerText);
+  // "Send anyway" approves the message as it is: your next Enter (or Send) sends it; nothing is pressed for you.
+  let approved = null;
+  function guard(event, editor) {
+    const text = editor.innerText;
+    if (approved !== null && text === approved) {
+      approved = null;
+      return false;
+    }
+    const found = findSecrets(text);
     if (!found.length) return false;
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -125,12 +130,9 @@
         {
           label: "Send anyway",
           run: () => {
-            bypass = true;
-            try {
-              resend();
-            } finally {
-              setTimeout(() => (bypass = false), 500);
-            }
+            approved = text;
+            editor.focus();
+            page.notice("Approved as it is: press Enter (or Send) to send it.");
           },
         },
       ],
@@ -236,7 +238,7 @@
         const editor = editorOf(event.target);
         if (!editor) return;
         if (event.key === "Enter" && !event.shiftKey && !event.isComposing && !event.ctrlKey && !event.altKey) {
-          guard(event, editor, () => editor.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, bubbles: true, cancelable: true })));
+          guard(event, editor);
         } else if (event.key === "K" && event.ctrlKey && event.shiftKey) {
           event.preventDefault();
           event.stopImmediatePropagation();
@@ -251,7 +253,7 @@
         const send = event.target.closest?.('[data-qa="texty_send_button"]');
         if (!send) return;
         const editor = send.closest('[data-qa="message_input"]')?.querySelector(".ql-editor") ?? document.querySelector('[data-qa="message_input"] .ql-editor');
-        if (editor) guard(event, editor, () => send.click());
+        if (editor) guard(event, editor);
       },
       true,
     );
