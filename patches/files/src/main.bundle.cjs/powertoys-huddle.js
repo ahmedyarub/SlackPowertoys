@@ -773,12 +773,12 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
 
   // --- Recording a huddle --------------------------------------------------------------------------------------
   // Every huddle is recorded (huddle.autoRecord, default true; "● Rec" in the huddle window stops and starts it): the
-  // huddle window's picture, the call's sound (Slack's own, nothing else) and your microphone, mixed, to .mkv in
+  // huddle window's picture, the sound the computer plays (the call, and any other sound) and your microphone, to .mkv in
   // huddle.recordingsFolder (default powertoys\recordings). When the huddle ends, Slack asks whether to keep it.
   //
   // A recording must never be lost or corrupted, so:
-  //   - a hidden window of Powertoys' own records (MediaRecorder) the huddle window, the sound of Slack's page and of
-  //     the huddle window (no other app's sound) and your microphone; every half second the main process takes what it
+  //   - a hidden window of Powertoys' own records (MediaRecorder) the huddle window, the computer's sound output
+  //     (loopback, which leaves the call playing) and your microphone; every half second the main process takes what it
   //     recorded (H.264 from the graphics card's encoder), appends it to the file and flushes it to the disk (fsync):
   //     a crash loses at most about a second, and Matroska cut short still plays; the whole part is also kept in
   //     memory (while 8 GB stays free), so a refused write loses nothing;
@@ -814,20 +814,23 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     fs.renameSync(`${json}.tmp`, json);
   }
 
-  // Two captures (the main process answers them: the huddle window's picture with the sound of Slack's page, then
-  // the sound of the huddle window), so the call is heard wherever Slack plays it, and nothing else on the computer.
+  // One capture (the main process answers it): the huddle window's picture and the sound the computer plays
+  // ("loopback"). Not the audio of Slack's page: capturing a page's audio takes it off the speakers (Electron forces
+  // it), so the call would go silent. Echo cancellation, noise suppression and auto gain are off for it: echo
+  // cancellation would remove exactly what the speakers play, the call.
   function recorderScript() {
     return (async () => {
-      const screen = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true });
-      const second = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-      second.getVideoTracks().forEach((track) => track.stop());
+      const screen = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: 30 },
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      });
       let mic = null;
       try {
         mic = await navigator.mediaDevices.getUserMedia({ audio: true });
       } catch {}
       const context = new AudioContext();
       const mix = context.createMediaStreamDestination();
-      for (const source of [screen, second, mic]) if (source?.getAudioTracks().length) context.createMediaStreamSource(source).connect(mix);
+      for (const source of [screen, mic]) if (source?.getAudioTracks().length) context.createMediaStreamSource(source).connect(mix);
       const stream = new MediaStream([...screen.getVideoTracks(), ...mix.stream.getAudioTracks()]);
       // H.264 is encoded by the graphics card (Media Foundation: NVENC, Quick Sync); VP8 only where it can't be.
       const mimeType = ["video/webm;codecs=h264,opus", "video/webm;codecs=vp8,opus"].find((type) => MediaRecorder.isTypeSupported(type));
@@ -854,13 +857,13 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
         new Promise((resolve) => {
           if (recorder.state === "inactive") return resolve(true);
           recorder.onstop = () => {
-            for (const track of [...screen.getTracks(), ...second.getTracks(), ...(mic?.getTracks() ?? [])]) track.stop();
+            for (const track of [...screen.getTracks(), ...(mic?.getTracks() ?? [])]) track.stop();
             resolve(true);
           };
           recorder.stop();
         });
       recorder.start(500);
-      return { sound: screen.getAudioTracks().length + second.getAudioTracks().length > 0, mic: !!mic, mimeType };
+      return { sound: screen.getAudioTracks().length > 0, mic: !!mic, mimeType };
     })();
   }
 
@@ -883,12 +886,10 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     fs.writeFileSync(page, "<!doctype html><title>Powertoys recorder</title>");
     await part.recorder.loadFile(page);
     part.recorder.webContents.on("console-message", (event) => event.level === "error" && warn(`recorder: ${event.message}`));
-    // The recorder's two captures, answered in order: the huddle window with Slack's page's sound, then the huddle
-    // window's own sound.
+    // The recorder's capture: the huddle window, with the sound the computer plays.
     const source = (await electron.desktopCapturer.getSources({ types: ["window"] })).find((each) => each.id === huddleWindow.getMediaSourceId());
     if (!source) throw new Error("the huddle window can't be captured");
-    const answers = [{ video: source, audio: slackPage()?.mainFrame ?? recording.contents.mainFrame }, { video: source, audio: recording.contents.mainFrame }];
-    electron.session.fromPartition("powertoys-recorder").setDisplayMediaRequestHandler((request, callback) => callback(answers.shift() ?? {}));
+    electron.session.fromPartition("powertoys-recorder").setDisplayMediaRequestHandler((request, callback) => callback({ video: source, audio: "loopback" }));
     const got = await inRecorder(part, `(${recorderScript.toString()})()`, 15000);
     // One take at a time, so the pieces reach the file in order.
     part.timer = setInterval(() => {
@@ -1108,7 +1109,7 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
   //   save        keep it (also what happens when the question is left unanswered);
   //   transcribe  Slack's own transcript: the audio (ffmpeg) is uploaded to Slack as a private file, shared nowhere,
   //               and transcribed in the language chosen in Settings; the transcript goes beside the recording
-  //               (<recording>.transcript.txt);
+  //               (<recording>.transcript.txt) and into it, as a subtitle track;
   //   summarize   Claude summarizes that transcript (transcribing first if need be): <recording>.summary.md;
   //   delete      to the Recycle Bin, with the transcript, summary and status file.
   const notice = (text) => slackPage()?.send("powertoys:notice", { text });
@@ -1158,6 +1159,37 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
 
   const clock = (ms) => `${String(Math.floor(ms / 60000)).padStart(2, "0")}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
 
+  /**
+   * The transcript inside the video too: a subtitle track (SRT, in the transcription language) added to a part with
+   * ffmpeg (streams copied as they are) into a copy, which replaces the part only once ffprobe reads it back complete
+   * with its subtitles; otherwise the part is left as it was.
+   */
+  const SUBTITLE_LANGUAGES = { en: "eng", de: "ger", es: "spa", fr: "fre", it: "ita", pt: "por", ja: "jpn", ko: "kor", zh: "chi" };
+  async function addSubtitles(file, lines) {
+    if (!lines.length) return;
+    const time = (ms) => {
+      const pad = (n, width = 2) => String(n).padStart(width, "0");
+      return `${pad(Math.floor(ms / 3600000))}:${pad(Math.floor(ms / 60000) % 60)}:${pad(Math.floor(ms / 1000) % 60)},${pad(ms % 1000, 3)}`;
+    };
+    const srt = `${file}.srt`;
+    fs.writeFileSync(srt, lines.map((line, i) => `${i + 1}\n${time(line.start)} --> ${time(Math.max(line.end ?? line.start + 2000, line.start + 500))}\n${line.text}\n`).join("\n"));
+    const copy = `${file}.subtitled.mkv`;
+    const language = SUBTITLE_LANGUAGES[claude.transcriptLanguage().slice(0, 2)] ?? "und";
+    try {
+      await execFile("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", file, "-i", srt, "-map", "0", "-map", "-0:s", "-map", "1", "-c", "copy", "-c:s", "srt", "-metadata:s:s:0", `language=${language}`, "-metadata:s:s:0", "title=Transcript (Slack)", "-f", "matroska", copy]);
+      const probe = JSON.parse(await execFile("ffprobe", ["-v", "error", "-show_entries", "format=duration:stream=codec_type", "-of", "json", copy]));
+      const duration = Number(probe.format?.duration);
+      if (!(duration > 0) || !probe.streams?.some((stream) => stream.codec_type === "subtitle")) throw new Error("the copy with subtitles isn't complete");
+      fs.renameSync(copy, file);
+      log(`recording subtitled: ${file} (${lines.length} lines)`);
+    } catch (caught) {
+      fs.rmSync(copy, { force: true });
+      warn(`recording: ${file} kept without subtitles (${caught.message})`);
+    } finally {
+      fs.rmSync(srt, { force: true });
+    }
+  }
+
   async function transcribeRecording(recording) {
     const transcript = `${recording.base}.transcript.txt`;
     if (fs.existsSync(transcript)) return transcript;
@@ -1174,6 +1206,7 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
         notice("Uploaded; Slack is transcribing it…");
         const lines = await slackTranscript(fileId);
         sections.push(`${recording.parts.length > 1 ? `# Part ${i + 1}\n` : ""}${lines.map((line) => `[${clock(line.start)}] ${line.text}`).join("\n")}`);
+        await addSubtitles(part, lines);
       } finally {
         fs.rmSync(audio, { force: true });
       }

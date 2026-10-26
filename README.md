@@ -78,10 +78,12 @@ patches/files/...           files that are entirely new (written for Powertoys),
   Windows connects your paired
   headphones (found by their Bluetooth class, whatever their name; `"huddle": {"headphones": "<name>"}` picks a
   device, `null` turns it off). If Bluetooth was off, it goes off again when the huddle ends, or at Cancel/Decline.
-- **Recording every huddle:** the huddle window, the call's sound (Slack's only, no other app) and your microphone,
+- **Recording every huddle:** the huddle window, everything the computer plays (so the call, which you keep hearing
+  as usual) and your microphone,
   encoded by your graphics card, to `.mkv` in `"huddle": {"recordingsFolder"}`. Written and flushed to disk every
   half second, kept in memory too, restarted in a new part if the recorder fails, finished before Slack quits and
-  recovered after a crash. When the huddle ends: **Transcribe** (Slack's own transcription, via a private upload),
+  recovered after a crash. When the huddle ends: **Transcribe** (Slack's own transcription, via a private upload,
+  saved beside the video and added to it as a subtitle track),
   **Summarize** (Claude), **Save** or **Delete** (Recycle Bin); also in the panel's Recordings tab.
   `"huddle": {"autoRecord": false}` turns it off. You are responsible for telling the people on the call.
 - **Transcription language:** a dropdown in the panel's Settings tab (English by default) for every transcript.
