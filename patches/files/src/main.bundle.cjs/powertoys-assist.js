@@ -56,14 +56,32 @@
     return electron.shell.openExternal(url);
   }
 
+  /**
+   * A prompt for Claude Code: into an existing session of the folder (it stays there; the answer comes back), or, with
+   * no session, a new one opened in Claude Desktop -> { folder, answer? }.
+   */
+  async function toClaude({ prompt, folder, sessionId }) {
+    if (!sessionId) {
+      await openClaude(prompt, folder);
+      return { folder };
+    }
+    const session = __webpack_require__("powertoys/huddle").projectSessions(folder).find((each) => each.id === sessionId);
+    if (!session) throw new Error("that Claude Code session is gone");
+    send("powertoys:notice", { text: `Sent to "${session.title}"; its answer shows here when it comes.` });
+    const answer = await ai.askSession({ sessionId, cwd: session.cwd, prompt, timeoutMs: 15 * 60000 });
+    return { folder, session: session.title, answer };
+  }
+  exports.toClaude = toClaude;
+
   // --- Sharing a video posted in Slack with Claude ---------------------------------------------------------
   /**
-   * Like sharing a recording: a Claude Code session (the workspace's linked folder, else Powertoys' folder) gets the
+   * Like sharing a recording: a Claude Code session (one of the workspace's linked folder's, or a new one there, else
+   * in Powertoys' folder) gets the
    * video's Slack transcript attached (an @ mention of a file saved under powertoys\transcripts; Slack is asked for
    * one and waited on, up to 3 minutes, if there's none yet) and the video only by its link, to save with
    * slack-powertoys' save_slack_file and look at only when the transcript isn't enough.
    */
-  async function shareClip({ link, teamId }) {
+  async function shareClip({ link, teamId, sessionId = null }) {
     let { clips } = await claude.clipTranscripts({ clip: link });
     const missing = clips.filter((clip) => !clip.lines.length);
     if (missing.length) {
@@ -90,9 +108,8 @@
       "save the video with slack-powertoys' save_slack_file and look at it, only at the parts you need.\n\n" +
       "Tell me in a few lines what it is about, then wait for my questions.";
     const where = folderOf(teamId) ?? powertoysDir();
-    await openClaude(prompt, where);
-    log(`shared ${clips.length} clip${clips.length === 1 ? "" : "s"} with Claude (a Code session in ${where})`);
-    return { folder: where };
+    log(`sharing ${clips.length} clip${clips.length === 1 ? "" : "s"} with Claude (${sessionId ? `session ${sessionId}` : "a new Code session"} in ${where})`);
+    return toClaude({ prompt, folder: where, sessionId });
   }
 
   // --- Opening a Slack link in the app ---------------------------------------------------------------------

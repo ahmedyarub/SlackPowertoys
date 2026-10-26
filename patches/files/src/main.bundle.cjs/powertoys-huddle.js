@@ -49,7 +49,7 @@
     }
   }
 
-  /** The sessions with a title in a folder (and its worktrees), newest first -> [{ id, title, cwd, updated }]. */
+  /** The sessions with a title in a folder (and its worktrees), newest first -> [{ id, title, cwd, updated }] (also for powertoys/assist). */
   function projectSessions(folder) {
     const project = folder.replace(/[:\\/.]/g, "-");
     return fs
@@ -68,6 +68,7 @@
         return title ? [{ id: path.basename(file, ".jsonl"), title, cwd: lines.find((line) => line.cwd)?.cwd ?? folder, updated }] : [];
       });
   }
+  exports.projectSessions = projectSessions;
 
   // --- What runs in the huddle window ------------------------------------------------------------------------
   // Serialized with toString() and run there (no access to anything here).
@@ -1639,11 +1640,11 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
   }
 
   /**
-   * Shares a recording with Claude: a new Claude Code session (in the workspace's linked folder, else the recordings
-   * folder) gets the transcript attached (an @ mention; transcribed first if need be) and only the video's path, to
+   * Shares a recording with Claude: a Claude Code session (one of the workspace's linked folder, chosen, or a new one
+   * there, else in the recordings folder) gets the transcript attached (an @ mention; transcribed first if need be) and only the video's path, to
    * be looked at only when the transcript isn't enough.
    */
-  async function shareRecording(recording) {
+  async function shareRecording(recording, sessionId = null) {
     const transcript = await transcribeRecording(recording);
     const folder = __webpack_require__("powertoys/claude").settings().folders[recording.teamId] ?? path.dirname(recording.base);
     const when = new Date(recording.since).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
@@ -1654,13 +1655,12 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
       "Work from the transcript. Only when the transcript isn't enough for something (what was on screen, or speech it got wrong), " +
       "look at the video, and only at the parts you need.\n\n" +
       "Tell me in a few lines what the call was about, then wait for my questions.";
-    await electron.shell.openExternal(`claude://code/new?folder=${encodeURIComponent(folder)}&q=${encodeURIComponent(prompt)}`);
-    log(`recording shared with Claude (a Code session in ${folder}): ${recording.base}`);
-    return { folder };
+    log(`sharing a recording with Claude (${sessionId ? `session ${sessionId}` : "a new Code session"} in ${folder}): ${recording.base}`);
+    return __webpack_require__("powertoys/assist").toClaude({ prompt, folder, sessionId });
   }
 
   /** An operation on a recording -> what the page shows. */
-  async function recordingOperation({ base, op }) {
+  async function recordingOperation({ base, op, sessionId }) {
     const recording = recordingAt(base);
     if (op === "save") {
       updateRecording(base, { status: "kept" });
@@ -1681,7 +1681,7 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
       const file = await summarizeRecording(recording);
       return { file, text: fs.readFileSync(file, "utf8") };
     }
-    if (op === "share") return shareRecording(recording);
+    if (op === "share") return shareRecording(recording, sessionId);
     throw new Error(`unknown operation ${op}`);
   }
 
@@ -1747,6 +1747,11 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     electron.ipcMain.handle("powertoys:huddle-cancelled", () => ringCancelled("main"));
     electron.ipcMain.handle("powertoys:recordings", () => listRecordings());
     electron.ipcMain.handle("powertoys:recording-open", (event, request) => openRecordingFile(request));
+    // The Claude Code sessions a share can go to: the linked folder's of a workspace (or of a recording's workspace).
+    electron.ipcMain.handle("powertoys:claude-sessions", (event, { teamId, base } = {}) => {
+      const folder = readSettings().claude?.folders?.[teamId ?? (base ? recordingAt(base).teamId : null)] ?? null;
+      return { folder, sessions: folder ? projectSessions(folder).map(({ id, title, updated }) => ({ id, title, updated })) : [] };
+    });
     electron.ipcMain.on("powertoys:call-event", (event, detail) => {
       try {
         callEvent(JSON.parse(detail));

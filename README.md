@@ -88,7 +88,7 @@ patches/files/...           files that are entirely new (written for Powertoys),
   says so, and it restarts. The file has the tracks "Call and microphone" (the default), "Call", "Microphone" and
   "Computer sound (backup)". When the huddle ends, Slack says whether the call's sound was recorded, and offers **Transcribe** (Slack's own transcription, via a private upload,
   saved beside the video and added to it as a subtitle track),
-  **Summarize** (Claude), **Share with Claude** (a new Claude Code session gets the transcript attached and only the
+  **Summarize** (Claude), **Share with Claude** (the Claude Code session you pick, whose answer shows in a pop-up, or a new one, gets the transcript attached and only the
   video's path, and looks at the video only when the transcript isn't enough) and **Keep** as checkboxes, or delete
   it (Recycle Bin, after a Yes/No); also in the panel's
   Recordings tab.
@@ -111,7 +111,7 @@ patches/files/...           files that are entirely new (written for Powertoys),
     with your connection keeps its link and a notice says why. **Save to Notion** in the message menu (a thread, huddle or
     clip, summarized with decisions and action items); **Draft a postmortem in Notion** in incident channels. Claude
     picks where each new page goes (an Incidents database for a postmortem, say) among the pages you shared.
-  - **Share video with Claude** in the message menu of a message with a video or audio clip: a new Claude Code
+  - **Share video with Claude** in the message menu of a message with a video or audio clip: the Claude Code session you pick, or a new
     session gets its Slack transcript attached and the video only by its link, to look at only when the transcript
     isn't enough.
   - **Claude in Slack:** a catch-up digest (tray, panel, or daily); **Explain** for selected text; **Draft a reply with

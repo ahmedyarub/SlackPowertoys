@@ -52,6 +52,8 @@
       .notice label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; white-space: nowrap; }
       .notice input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: #007a5a; cursor: pointer; }
       .notice input:focus-visible, .notice button:focus-visible { outline: 2px solid #1d9bd1; outline-offset: 2px; }
+      .notice select { font: inherit; max-width: 320px; padding: 3px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,.25); background: #1a1d21; color: #fff; }
+      .notice select:focus-visible { outline: 2px solid #1d9bd1; outline-offset: 2px; }
       .notice .verdict { font-size: 12px; opacity: .85; }
       .notice .verdict.warn { color: #ecb22e; opacity: 1; }
     </style>`;
@@ -97,6 +99,40 @@
   const reason = (caught) => caught.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
 
   /** What can be done with a huddle's recording (powertoys/huddle): transcribe, summarize, save, delete. */
+  /**
+   * Which Claude Code session a share goes to: "(New session)" (the default) or one of the workspace's linked folder's
+   * (newest first), in a small dialog -> the session's id, null for a new one, undefined if closed.
+   */
+  async function chooseSession(request) {
+    const { folder, sessions } = await invoke("claude-sessions", request).catch(() => ({ folder: null, sessions: [] }));
+    const root = ui();
+    root.querySelector(".notice")?.remove();
+    return new Promise((resolve) => {
+      const node = Object.assign(document.createElement("div"), { className: "notice" });
+      node.setAttribute("role", "dialog");
+      node.setAttribute("aria-label", "Share with Claude");
+      const label = Object.assign(document.createElement("label"), { textContent: "Share with" });
+      const select = document.createElement("select");
+      select.append(Object.assign(document.createElement("option"), { value: "", textContent: "(New session)" }));
+      for (const session of sessions) select.append(Object.assign(document.createElement("option"), { value: session.id, textContent: session.title }));
+      label.append(select);
+      const done = (value) => (node.remove(), resolve(value));
+      const send = Object.assign(document.createElement("button"), { textContent: "Send" });
+      send.addEventListener("click", () => done(select.value || null));
+      const close = Object.assign(document.createElement("button"), { textContent: "×", className: "close", title: "Don't share" });
+      close.addEventListener("click", () => done(undefined));
+      node.addEventListener("keydown", (event) => event.key === "Escape" && done(undefined));
+      const where = folder ? "" : " (this workspace has no linked folder: a new session)";
+      node.append(label, send, close, where);
+      root.appendChild(node);
+      select.focus();
+    });
+  }
+
+  /** A share's outcome: a new session opening, or the chosen session's answer. */
+  const shared = ({ folder, session, answer }) =>
+    answer !== undefined ? popover({ title: `Claude · ${session}`, text: answer || "(no answer)", markdown: true }) : notice(`Opening Claude Code in ${folder} with the transcript…`);
+
   function recordingActions(base) {
     const open = (file) => invoke("recording-open", { base, file }).catch((caught) => notice(reason(caught)));
     return [
@@ -118,11 +154,11 @@
       },
       {
         label: "Share with Claude",
-        run: () =>
-          invoke("recording", { base, op: "share" }).then(
-            ({ folder }) => notice(`Opening Claude Code in ${folder} with the transcript…`),
-            (caught) => notice(`Couldn't share it with Claude: ${reason(caught)}`),
-          ),
+        run: async () => {
+          const sessionId = await chooseSession({ base });
+          if (sessionId === undefined) return;
+          return invoke("recording", { base, op: "share", sessionId }).then(shared, (caught) => notice(`Couldn't share it with Claude: ${reason(caught)}`));
+        },
       },
       { label: "Save", run: () => invoke("recording", { base, op: "save" }).then(() => notice("Recording saved.")) },
       { label: "Delete", run: () => invoke("recording", { base, op: "delete" }).then(() => notice("Recording moved to the Recycle Bin.")) },
@@ -418,7 +454,7 @@
 
   const invoke = (name, request) => electron.ipcRenderer.invoke(`powertoys:${name}`, request);
   const currentTeamId = () => /\/client\/([A-Z0-9]+)/.exec(location.pathname)?.[1] ?? null;
-  Object.assign(exports, { ui, notice, popover, renderMarkdown, invoke, reason, recordingActions, workspaceOf, currentTeamId, log, on: (channel, fn) => electron.ipcRenderer.on(channel, (event, payload) => fn(payload)) });
+  Object.assign(exports, { ui, notice, popover, renderMarkdown, invoke, reason, recordingActions, chooseSession, shared, workspaceOf, currentTeamId, log, on: (channel, fn) => electron.ipcRenderer.on(channel, (event, payload) => fn(payload)) });
 
   const PAGE_STYLE = ".powertoys-menu-item button:hover, .powertoys-menu-item button:focus { background: #1264a3; color: #fff; }";
   const PAGE_MODULES = ["powertoys/page-dev", "powertoys/page-compose", "powertoys/page-panel", "powertoys/page-history", "powertoys/page-media"];

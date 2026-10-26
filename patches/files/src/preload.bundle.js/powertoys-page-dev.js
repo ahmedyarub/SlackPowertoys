@@ -101,8 +101,9 @@
       show: ({ element }) => !!element.querySelector('video, audio, [data-qa*="video"], [data-qa*="audio"], [data-qa*="clip"], [data-qa*="media_player"]'),
       run: async ({ link, teamId }) => {
         try {
-          const { folder } = await page.invoke("share-clip", { link, teamId });
-          page.notice(`Opening Claude Code in ${folder} with the transcript…`);
+          const sessionId = await page.chooseSession({ teamId });
+          if (sessionId === undefined) return;
+          page.shared(await page.invoke("share-clip", { link, teamId, sessionId }));
         } catch (caught) {
           page.notice(`Couldn't share it with Claude: ${page.reason(caught)}`);
         }
