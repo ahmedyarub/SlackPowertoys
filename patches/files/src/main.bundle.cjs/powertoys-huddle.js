@@ -80,8 +80,9 @@
     const root = host.attachShadow({ mode: "open" });
     root.innerHTML = `<style>
       * { box-sizing: border-box; font: 12px/1.4 Lato, "Segoe UI", sans-serif; }
-      .chip { position: fixed; z-index: 2147483646; left: 10px; bottom: 76px; max-width: 260px; padding: 3px 9px; border: 0;
-        border-radius: 999px; background: rgba(255,255,255,.08); color: #d1d2d3; opacity: .45; cursor: pointer;
+      .chip { position: fixed; z-index: 2147483646; left: 10px; bottom: 76px; max-width: 260px; padding: 3px 9px;
+        border: 1px solid rgba(255,255,255,.18); border-radius: 999px; background: rgba(29,28,29,.82); color: #f8f8f8;
+        box-shadow: 0 1px 3px rgba(0,0,0,.3); opacity: .7; cursor: pointer;
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: opacity .2s; }
       .chip:hover, .chip.open { opacity: 1; }
       .rec { bottom: 102px; }
