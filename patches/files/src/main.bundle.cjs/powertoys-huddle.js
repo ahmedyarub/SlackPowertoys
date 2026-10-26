@@ -258,7 +258,8 @@
     // A caption: the side-by-side list's lines, or the overlay's.
     const LINE = ".p-huddle_event_log__base_event, .p-huddle_closed_caption_event__wrapper";
     const textOf = (line) => line.querySelector('[data-qa="huddle_transcribe_event"], .p-huddle_closed_caption_event__transcription')?.textContent.trim() ?? "";
-    const nameOf = (line) => line.querySelector(".p-huddle_event_log__member_name, .p-huddle_closed_caption_event__member_name")?.textContent.trim() ?? "";
+    // (The overlay's names end with a colon.)
+    const nameOf = (line) => line.querySelector(".p-huddle_event_log__member_name, .p-huddle_closed_caption_event__member_name")?.textContent.trim().replace(/:$/, "") ?? "";
     /** A caption line as a question, with who said it and the lines before it. */
     function questionAt(line) {
       const lines = [...document.querySelectorAll(LINE)].filter((each) => textOf(each));
@@ -485,21 +486,42 @@
 
     // Every caption line, with who said it and when it first showed, for the recording's speaker-named transcript
     // (sent again while Slack corrects a line's words).
+    // The side-by-side list when it shows, else the overlay: when the list replaces the overlay it shows the same lines
+    // again (new elements), so a line already seen (same speaker, same words) keeps its first id and time.
     const captions = new WeakMap(); // line element -> { id, name, text, at }
+    const seenLines = new Map(); // "name|words" -> the caption first seen with them
     let captionCount = 0;
+    let lastCaptionAt = 0;
     setInterval(() => {
+      const list = document.querySelectorAll(".p-huddle_event_log__base_event");
+      const lines = [...list].some((line) => textOf(line)) ? list : document.querySelectorAll(".p-huddle_closed_caption_event__wrapper");
       let name = "";
-      for (const line of document.querySelectorAll(LINE)) {
+      for (const line of lines) {
         name = nameOf(line) || name;
         const text = textOf(line);
         if (!text) continue;
         let caption = captions.get(line);
-        if (!caption) captions.set(line, (caption = { id: ++captionCount, at: Date.now(), name: "", text: "" }));
+        if (!caption) {
+          caption = seenLines.get(`${name}|${text}`) ?? { id: ++captionCount, at: Date.now(), name: "", text: "" };
+          captions.set(line, caption);
+        }
         if (caption.text === text && caption.name === name) continue;
         Object.assign(caption, { name, text });
+        seenLines.set(`${name}|${text}`, caption);
+        lastCaptionAt = Date.now();
         send({ type: "caption", ...caption });
       }
     }, 2000);
+    // Captions can stop reaching the recording (a call had them for its first 82 s only): every 2 minutes without a new
+    // line, what the window shows, for the log.
+    setInterval(() => {
+      if (Date.now() - lastCaptionAt < 120000) return;
+      const tab = [...document.querySelectorAll('[data-qa="tabs_item"]')].find((each) => each.getAttribute("aria-selected") === "true")?.textContent.trim() ?? "none";
+      send({
+        type: "log",
+        text: `captions: none new for ${Math.round((Date.now() - lastCaptionAt) / 60000)} min; side panel tab "${tab}", list lines ${document.querySelectorAll(".p-huddle_event_log__base_event").length}, overlay lines ${document.querySelectorAll(".p-huddle_closed_caption_event__wrapper").length}, "Captions are being generated" ${/captions are being generated/i.test(document.body.innerText) ? "shown" : "not shown"}`,
+      });
+    }, 120000);
     const lastLines = (count) => {
       let name = "";
       const said = [];

@@ -54,6 +54,8 @@
       .notice input:focus-visible, .notice button:focus-visible { outline: 2px solid #1d9bd1; outline-offset: 2px; }
       .notice select { font: inherit; max-width: 320px; padding: 3px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,.25); background: #1a1d21; color: #fff; }
       .notice select:focus-visible { outline: 2px solid #1d9bd1; outline-offset: 2px; }
+      .notice.recording-prompt { flex-wrap: wrap; row-gap: 8px; width: max-content; max-width: calc(100vw - 32px); }
+      .notice .prompt-head { flex: 1 0 100%; display: flex; flex-direction: column; gap: 2px; }
       .notice .verdict { font-size: 12px; opacity: .85; }
       .notice .verdict.warn { color: #ecb22e; opacity: 1; }
     </style>`;
@@ -218,7 +220,10 @@
     const verdictNode = verdict ? Object.assign(document.createElement("span"), { textContent: verdict, className: verdict.includes("⚠") ? "verdict warn" : "verdict" }) : "";
     if (verdict?.includes("⚠")) verdictNode.setAttribute("role", "alert");
     const choices = () => {
-      node.replaceChildren(title, verdictNode, keep.wrap, transcribe.wrap, summarize.wrap, share.wrap, tickets.wrap, button("OK", apply), close);
+      // Two rows: what was recorded (and the check) across the top, the choices under it.
+      const head = Object.assign(document.createElement("div"), { className: "prompt-head" });
+      head.append(Object.assign(document.createElement("div"), { textContent: title }), verdictNode);
+      node.replaceChildren(head, keep.wrap, transcribe.wrap, summarize.wrap, share.wrap, tickets.wrap, button("OK", apply), close);
       keep.input.focus();
     };
     const apply = () => {
