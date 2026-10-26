@@ -57,8 +57,35 @@
   }
 
   /**
-   * A prompt for Claude Code: into an existing session of the folder (it stays there; the answer comes back), or, with
-   * no session, a new one opened in Claude Desktop -> { folder, answer? }.
+   * A command for Claude Desktop's Powertoys: its folder (%APPDATA%\Claude\powertoys) is watched for
+   * command-request.json ({ id, command, … }), answered in command-result.json ({ id, ok, result | error }) -> the
+   * result; fails on an error, an unknown command, or no answer within 4 seconds.
+   */
+  async function desktopCommand(request) {
+    const folder = path.join(process.env.APPDATA ?? "", "Claude", "powertoys");
+    if (!fs.existsSync(folder)) throw new Error("no Claude Desktop Powertoys folder");
+    const id = `slack-${Date.now().toString(36)}`;
+    const resultFile = path.join(folder, "command-result.json");
+    fs.writeFileSync(path.join(folder, "command-request.json.tmp"), JSON.stringify({ ...request, id }));
+    fs.renameSync(path.join(folder, "command-request.json.tmp"), path.join(folder, "command-request.json"));
+    for (let waited = 0; waited < 4000; waited += 200) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      let answer = null;
+      try {
+        answer = JSON.parse(fs.readFileSync(resultFile, "utf8"));
+      } catch {}
+      if (answer?.id === id) {
+        if (!answer.ok) throw new Error(answer.error ?? "refused");
+        return answer.result ?? true;
+      }
+    }
+    throw new Error("no answer within 4 s");
+  }
+
+  /**
+   * A prompt for Claude Code: into an existing session of the folder (Claude Desktop queues it, or it opens with the
+   * prompt on the clipboard), or, with no session, a new one opened in Claude Desktop -> { folder, session?, queued?,
+   * clipboard? }.
    */
   async function toClaude({ prompt, folder, sessionId }) {
     if (!sessionId) {
@@ -67,9 +94,19 @@
     }
     const session = __webpack_require__("powertoys/huddle").projectSessions(folder).find((each) => each.id === sessionId);
     if (!session) throw new Error("that Claude Code session is gone");
-    send("powertoys:notice", { text: `Sent to "${session.title}"; its answer shows here when it comes.` });
-    const answer = await ai.askSession({ sessionId, cwd: session.cwd, prompt, timeoutMs: 15 * 60000 });
-    return { folder, session: session.title, answer };
+    // The share goes into the session as a real message in Claude Desktop, never written behind its back (a session
+    // open there doesn't show turns added by another process, and two writers on one transcript is unsafe):
+    // Claude Desktop's Powertoys queue it (command-request.json: it is sent when the session's turn is over), or,
+    // with a Claude Desktop that can't, the session opens with the share on the clipboard, to paste and send.
+    const queued = await desktopCommand({ command: "queuePrompt", cliSessionId: sessionId, text: prompt }).catch((caught) => (log(`share: Claude Desktop didn't queue it (${caught.message})`), null));
+    await electron.shell.openExternal(`claude://resume?session=${encodeURIComponent(sessionId)}`);
+    if (queued) {
+      log(`shared into session ${sessionId} (${session.title}): queued in Claude Desktop`);
+      return { folder, session: session.title, queued: true };
+    }
+    electron.clipboard.writeText(prompt);
+    log(`shared into session ${sessionId} (${session.title}): opened in Claude Desktop, the share on the clipboard`);
+    return { folder, session: session.title, clipboard: true };
   }
   exports.toClaude = toClaude;
 

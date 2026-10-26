@@ -130,8 +130,12 @@
   }
 
   /** A share's outcome: a new session opening, or the chosen session's answer. */
-  const shared = ({ folder, session, answer }) =>
-    answer !== undefined ? popover({ title: `Claude · ${session}`, text: answer || "(no answer)", markdown: true }) : notice(`Opening Claude Code in ${folder} with the transcript…`);
+  const shared = ({ folder, session, queued, clipboard }) =>
+    queued
+      ? notice(`Sent to "${session}" in Claude Desktop (it goes in as soon as its current turn is over).`)
+      : clipboard
+        ? notice(`"${session}" is open in Claude Desktop, and the share is on the clipboard: paste it there (Ctrl+V) and send.`, null, 20000)
+        : notice(`Opening Claude Code in ${folder} with the transcript…`);
 
   function recordingActions(base) {
     const open = (file) => invoke("recording-open", { base, file }).catch((caught) => notice(reason(caught)));
@@ -339,27 +343,40 @@
   exports.addMessageMenuItem = (item) => menuItems.push(item);
 
   // The message's menu gets every item; a file's own menu (the ⋮ on a video: Download, Share file…, Copy link) gets
-  // the items meant for files ({ inFileMenu: true }), after its "Copy link".
+  // the items meant for files ({ inFileMenu: true }). They go at the end, after a divider: Slack's menu works out
+  // the item under the mouse from its items' places, so one put between them made it highlight the item above.
+  // Each is a copy of "Copy link" (a plain item), with our label and icon.
   function addMenuItems(menu, fileMenu = false) {
     if (!lastMessage || Date.now() - lastMessage.at > 5000 || menu.querySelector(".powertoys-menu-item")) return;
-    let after = menu.querySelector('[data-qa="copy_link-wrapper"]');
-    if (!after && fileMenu) {
+    if (fileMenu) return attachUnder(menu);
+    let template = menu.querySelector('[data-qa="copy_link-wrapper"]');
+    if (!template && fileMenu) {
       const copy = [...menu.querySelectorAll('[role="menuitem"]')].find((each) => each.textContent.trim() === "Copy link");
-      after = copy?.closest('[data-qa$="-wrapper"]') ?? copy?.parentElement;
+      template = copy?.closest('[data-qa$="-wrapper"]') ?? copy?.parentElement;
     }
-    if (!after) return log(`a ${fileMenu ? "file" : "message"} menu without "Copy link": nothing added`);
-    if (fileMenu) log(`file menu: items added after ${after.dataset.qa ?? after.className}`);
+    if (!template) return log(`a ${fileMenu ? "file" : "message"} menu without "Copy link": nothing added`);
+    // After the last item: its own wrapper (the largest element around it holding no other item), in its list.
+    let after = [...menu.querySelectorAll('[role="menuitem"]')].at(-1) ?? template;
+    while (after.parentElement && after.parentElement !== menu && after.parentElement.querySelectorAll('[role="menuitem"]').length === 1) after = after.parentElement;
     const message = lastMessage;
-    for (const item of menuItems) {
-      if (fileMenu && !item.inFileMenu) continue;
-      if (item.show && !item.show(message)) continue;
-      const wrapper = after.cloneNode(true);
+    const wanted = menuItems.filter((item) => (!fileMenu || item.inFileMenu) && (!item.show || item.show(message)));
+    if (!wanted.length) return;
+    const divider = menu.querySelector('[role="separator"], [class*="menu_separator"], hr')?.cloneNode(true);
+    if (divider) {
+      divider.classList.add("powertoys-menu-item");
+      after.after(divider);
+      after = divider;
+    }
+    for (const item of wanted) {
+      const wrapper = template.cloneNode(true);
       wrapper.dataset.qa = `powertoys_${item.label.toLowerCase().replace(/\W+/g, "_")}-wrapper`;
       wrapper.classList.add("powertoys-menu-item");
       for (const node of wrapper.querySelectorAll("[id]")) node.removeAttribute("id");
       // The item copied may be the highlighted one (under the mouse): the copy starts plain, and highlights on hover.
-      for (const node of [wrapper, ...wrapper.querySelectorAll("[class]")]) {
-        for (const name of [...node.classList]) if (/--(highlighted|selected|active|focused)$/.test(name)) node.classList.remove(name);
+      // Any state modifier goes (…--highlighted, --hover, --active, --selected, --focus…), and state attributes too.
+      for (const node of [wrapper, ...wrapper.querySelectorAll("*")]) {
+        for (const name of [...node.classList]) if (/--[\w-]*(highlight|hover|active|selected|focus)/i.test(name)) node.classList.remove(name);
+        for (const attribute of ["aria-selected", "aria-current", "data-highlighted", "data-hover", "data-active", "data-focus"]) node.removeAttribute(attribute);
       }
       wrapper.querySelector(".c-menu_item__shortcut")?.remove();
       const icon = wrapper.querySelector(".c-menu_item__icon");
@@ -367,6 +384,16 @@
       const label = wrapper.querySelector(".c-menu_item__label") ?? [...wrapper.querySelectorAll("*")].findLast((node) => !node.children.length && node.textContent.trim()) ?? wrapper;
       label.textContent = item.label;
       const button = wrapper.querySelector("button") ?? wrapper;
+      // Slack's menu keeps which of its items is highlighted in its own state, and ours isn't one of its items: under
+      // the mouse, ours would be highlighted beside the item Slack last marked. Its state is left alone; while the
+      // mouse is on ours, the menu only hides Slack's highlight (drawn as an ordinary item's colors), so moving back
+      // onto that item shows it highlighted again.
+      button.addEventListener("mouseenter", () => {
+        const plain = [...menu.querySelectorAll('[role="menuitem"]')].find((item) => !/--highlighted/.test(item.className) && !item.closest(".powertoys-menu-item"));
+        if (plain) menu.style.setProperty("--powertoys-menu-color", getComputedStyle(plain).color);
+        menu.classList.add("powertoys-menu-over");
+      });
+      button.addEventListener("mouseleave", () => menu.classList.remove("powertoys-menu-over"));
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -377,6 +404,53 @@
       after.after(wrapper);
       after = wrapper;
     }
+  }
+
+  // A file's own menu (the ⋮ on a video): Slack's menu tracks its items and their places itself, and an item put
+  // inside it made the wrong neighbour highlight. Ours are drawn just under the menu instead, in Powertoys' own layer,
+  // looking like its items, and go when it closes; the menu itself is left as Slack made it.
+  let underMenu = null;
+  function attachUnder(menu) {
+    underMenu?.remove();
+    const message = lastMessage;
+    const wanted = menuItems.filter((item) => item.inFileMenu && (!item.show || item.show(message)));
+    if (!wanted.length) return;
+    const box = document.createElement("div");
+    box.className = "under-menu";
+    box.setAttribute("role", "menu");
+    const plain = [...menu.querySelectorAll('[role="menuitem"]')].find((item) => !/--highlighted/.test(item.className));
+    const style = plain ? getComputedStyle(plain) : null;
+    for (const item of wanted) {
+      const button = document.createElement("button");
+      button.setAttribute("role", "menuitem");
+      button.innerHTML = SPARKLE;
+      button.append(item.label);
+      if (style) Object.assign(button.style, { font: style.font, color: style.color, padding: style.padding });
+      // On press (Slack closes its menu on a press outside it, before a click would come).
+      button.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        underMenu?.remove();
+        underMenu = null;
+        document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, bubbles: true }));
+        item.run(message);
+      });
+      box.append(button);
+    }
+    const place = () => {
+      if (!menu.isConnected) {
+        box.remove();
+        if (underMenu === box) underMenu = null;
+        return;
+      }
+      const rect = menu.getBoundingClientRect();
+      const fitsBelow = rect.bottom + 8 + box.offsetHeight <= innerHeight;
+      Object.assign(box.style, { left: `${rect.left}px`, width: `${rect.width}px`, top: `${fitsBelow ? rect.bottom + 4 : rect.top - box.offsetHeight - 4}px` });
+      requestAnimationFrame(place);
+    };
+    ui().appendChild(box);
+    underMenu = box;
+    place();
   }
 
   exports.addMessageMenuItem({ label: "Ask Claude about this", run: ({ link, teamId }) => askClaude({ link, teamId, kind: "message" }) });
@@ -474,13 +548,23 @@
       .popover-actions { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid rgba(255,255,255,.1); }
       .popover-actions button { font: inherit; font-weight: 700; color: #fff; background: #007a5a; border: 0; border-radius: 4px;
         padding: 5px 12px; cursor: pointer; }
-      .popover-actions button + button { background: #3f4246; }`;
+      .popover-actions button + button { background: #3f4246; }
+      .under-menu { position: fixed; z-index: 2147483647; padding: 6px 0; border-radius: 8px; background: #222529;
+        box-shadow: 0 0 0 1px rgba(255,255,255,.13), 0 4px 12px rgba(0,0,0,.4); }
+      .under-menu button { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: none; color: #d1d2d3;
+        text-align: left; cursor: pointer; font: 15px Lato, sans-serif; padding: 6px 24px; }
+      .under-menu button svg { width: 16px; height: 16px; flex: none; }
+      .under-menu button:hover, .under-menu button:focus-visible { background: #1264a3; color: #fff !important; }`;
 
   const invoke = (name, request) => electron.ipcRenderer.invoke(`powertoys:${name}`, request);
   const currentTeamId = () => /\/client\/([A-Z0-9]+)/.exec(location.pathname)?.[1] ?? null;
   Object.assign(exports, { ui, notice, popover, renderMarkdown, invoke, reason, recordingActions, chooseSession, shared, workspaceOf, currentTeamId, log, on: (channel, fn) => electron.ipcRenderer.on(channel, (event, payload) => fn(payload)) });
 
-  const PAGE_STYLE = ".powertoys-menu-item button:hover, .powertoys-menu-item button:focus { background: #1264a3; color: #fff; }";
+  // Highlighted under the mouse, or when the keyboard moved to it; not on :focus, which Slack's menu gives an item as
+  // the mouse moves over its neighbours (that left ours highlighted beside "Copy link").
+  const PAGE_STYLE =
+    ".powertoys-menu-item button:hover, .powertoys-menu-item button:focus-visible { background: #1264a3; color: #fff; }" +
+    ".powertoys-menu-over [class*='--highlighted']:not(.powertoys-menu-item *) { background: transparent !important; color: var(--powertoys-menu-color, inherit) !important; }";
   const PAGE_MODULES = ["powertoys/page-dev", "powertoys/page-compose", "powertoys/page-panel", "powertoys/page-history", "powertoys/page-media"];
 
   exports.start = function start(store) {
