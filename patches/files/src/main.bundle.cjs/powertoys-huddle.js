@@ -818,7 +818,9 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
   // ("loopback"). Not the audio of Slack's page: capturing a page's audio takes it off the speakers (Electron forces
   // it), so the call would go silent. Echo cancellation, noise suppression and auto gain are off for it: echo
   // cancellation would remove exactly what the speakers play, the call.
-  function recorderScript() {
+  // withVideo false: the huddle window couldn't be captured (minimized, hidden), so the capture's picture (a screen,
+  // which getDisplayMedia needs) is dropped and the sound alone is recorded: the call and the microphone.
+  function recorderScript({ withVideo }) {
     return (async () => {
       const screen = await navigator.mediaDevices.getDisplayMedia({
         video: { frameRate: 30 },
@@ -831,9 +833,10 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
       const context = new AudioContext();
       const mix = context.createMediaStreamDestination();
       for (const source of [screen, mic]) if (source?.getAudioTracks().length) context.createMediaStreamSource(source).connect(mix);
-      const stream = new MediaStream([...screen.getVideoTracks(), ...mix.stream.getAudioTracks()]);
+      if (!withVideo) screen.getVideoTracks().forEach((track) => track.stop());
+      const stream = new MediaStream([...(withVideo ? screen.getVideoTracks() : []), ...mix.stream.getAudioTracks()]);
       // H.264 is encoded by the graphics card (Media Foundation: NVENC, Quick Sync); VP8 only where it can't be.
-      const mimeType = ["video/webm;codecs=h264,opus", "video/webm;codecs=vp8,opus"].find((type) => MediaRecorder.isTypeSupported(type));
+      const mimeType = (withVideo ? ["video/webm;codecs=h264,opus", "video/webm;codecs=vp8,opus"] : ["audio/webm;codecs=opus"]).find((type) => MediaRecorder.isTypeSupported(type));
       const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8000000 });
       const chunks = [];
       let failed = null;
@@ -888,9 +891,12 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     part.recorder.webContents.on("console-message", (event) => event.level === "error" && warn(`recorder: ${event.message}`));
     // The recorder's capture: the huddle window, with the sound the computer plays.
     const source = (await electron.desktopCapturer.getSources({ types: ["window"] })).find((each) => each.id === huddleWindow.getMediaSourceId());
-    if (!source) throw new Error("the huddle window can't be captured");
-    electron.session.fromPartition("powertoys-recorder").setDisplayMediaRequestHandler((request, callback) => callback({ video: source, audio: "loopback" }));
-    const got = await inRecorder(part, `(${recorderScript.toString()})()`, 15000);
+    // A window Windows can't capture (minimized, hidden): the sound alone, rather than nothing.
+    const screen = source ? null : (await electron.desktopCapturer.getSources({ types: ["screen"] }))[0];
+    if (!source && !screen) throw new Error("nothing to capture the sound with");
+    if (!source) warn("recording: the huddle window can't be captured; recording the sound only");
+    electron.session.fromPartition("powertoys-recorder").setDisplayMediaRequestHandler((request, callback) => callback({ video: source ?? screen, audio: "loopback" }));
+    const got = await inRecorder(part, `(${recorderScript.toString()})(${JSON.stringify({ withVideo: Boolean(source) })})`, 15000);
     // One take at a time, so the pieces reach the file in order.
     part.timer = setInterval(() => {
       if (part.busy) return;
@@ -1289,13 +1295,22 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     return { ok: true };
   }
 
-  /** Quitting Slack while recording: the recordings are finished first, then Slack quits. */
-  let quitting = false;
+  /**
+   * Quitting Slack while recording: the recordings are finished first, then Slack quits. This runs before Slack's own
+   * before-quit listener, and holds both before-quit and will-quit (Slack calls app.quit again ~60 ms later) until
+   * every recording is stopped, written and repaired; otherwise the last seconds were lost.
+   */
+  let finishing = null;
   function finishBeforeQuit(event) {
-    if (!recordings.size || quitting) return;
+    if (finishing === "done") return;
+    if (!finishing && !recordings.size) return;
     event.preventDefault();
-    quitting = true;
-    Promise.all([...recordings.values()].map((recording) => stopRecording(recording.contents, true).catch((caught) => warn(`recording: ${caught.message}`)))).finally(() => electron.app.quit());
+    if (finishing) return;
+    log(`quitting: finishing ${recordings.size} recording(s) first`);
+    finishing = Promise.all([...recordings.values()].map((recording) => stopRecording(recording.contents, true).catch((caught) => warn(`recording: ${caught.message}`)))).finally(() => {
+      finishing = "done";
+      electron.app.quit();
+    });
   }
 
   exports.start = function start() {
@@ -1309,7 +1324,8 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     electron.ipcMain.handle("powertoys:huddle-cancelled", () => ringCancelled("main"));
     electron.ipcMain.handle("powertoys:recordings", () => listRecordings());
     electron.ipcMain.handle("powertoys:recording-open", (event, request) => openRecordingFile(request));
-    electron.app.on("before-quit", finishBeforeQuit);
+    electron.app.prependListener("before-quit", finishBeforeQuit);
+    electron.app.prependListener("will-quit", finishBeforeQuit);
     // Once Slack's page is up (it shows the question), recordings a crash or a quit left unfinished.
     const recover = setInterval(() => {
       if (!slackPage() || slackPage().isLoading()) return;
