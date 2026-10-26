@@ -50,16 +50,28 @@
     let state = boosts.get(video);
     if (!state) {
       if (percent <= 100) return;
+      const kind = /^blob:/.test(video.currentSrc) ? "stream (blob)" : video.currentSrc.split("?")[0].slice(0, 80);
+      page.log(`louder: ${kind}, crossOrigin ${video.crossOrigin}, muted ${video.muted}, volume ${video.volume}, playing ${!video.paused}`);
       if (!video.crossOrigin && /^https:\/\/files\.slack\.com\//.test(video.currentSrc)) await reloadWithCors(video);
       context ??= new AudioContext();
       const gain = context.createGain();
+      // The level after the gain, for the log: silence there means the video's sound isn't reaching the gain.
+      const meter = context.createAnalyser();
       context.createMediaElementSource(video).connect(gain).connect(context.destination);
-      state = { gain, percent: 100 };
+      gain.connect(meter);
+      state = { gain, meter, percent: 100 };
       boosts.set(video, state);
     }
     if (context.state === "suspended") await context.resume();
     state.gain.gain.value = percent / 100;
     state.percent = percent;
+    clearTimeout(state.report);
+    state.report = setTimeout(() => {
+      const samples = new Float32Array(state.meter.fftSize);
+      state.meter.getFloatTimeDomainData(samples);
+      const peak = samples.reduce((top, sample) => Math.max(top, Math.abs(sample)), 0);
+      page.log(`louder: ${percent}%, audio ${context.state} at ${context.sampleRate} Hz, peak after the gain ${peak.toFixed(3)}, video ${video.paused ? "paused" : "playing"}, volume ${video.volume}, muted ${video.muted}`);
+    }, 1500);
   }
 
   // --- The slider ------------------------------------------------------------------------------------------
