@@ -264,10 +264,14 @@
     return { file };
   }
 
+  // "Ask Claude to review": the prompt is "dev": { "reviewPrompt" } ({pr}: the pull request's link), set in the panel's
+  // Settings tab.
+  const REVIEW_PROMPT = "Review the PR {pr} focusing only on major business logic issues. No nit-picking";
+  const reviewPrompt = () => settingsOf("dev", {}).reviewPrompt?.trim() || REVIEW_PROMPT;
   function reviewPull({ url, teamId }) {
     const ref = dev.parseGitHub(url);
     return dev.repoFolder(ref.owner, ref.repo).then((folder) => {
-      openClaude(`Review this pull request: ${url}. Check it out (gh pr checkout ${ref.number}), read the diff and the code around it, and list problems by severity with file:line, then anything worth simplifying.`, folder ?? folderOf(teamId));
+      openClaude(reviewPrompt().replaceAll("{pr}", url), folder ?? folderOf(teamId));
       return { folder };
     });
   }
@@ -523,6 +527,12 @@
     "fill-snippet": fillSnippet,
     "notion-setup": notionSetup,
     "notion-sign-in": notionSignIn,
+    "review-prompt": ({ prompt }) => {
+      const value = String(prompt ?? "").trim();
+      updateSettings((current) => ({ ...current, dev: { ...current.dev, reviewPrompt: value && value !== REVIEW_PROMPT ? value : undefined } }));
+      log(`review prompt ${value && value !== REVIEW_PROMPT ? "set" : "back to the default"}`);
+      return { prompt: reviewPrompt() };
+    },
     "transcript-language": ({ language }) => {
       if (!(language in claude.TRANSCRIPT_LANGUAGES)) throw new Error(`not a language Slack transcribes in: ${language}`);
       updateSettings((current) => ({ ...current, transcripts: { ...current.transcripts, language } }));
@@ -534,6 +544,8 @@
       notionClientId: notion.settings().clientId || null,
       notionRedirectUri: notion.redirectUri,
       transcriptLanguage: claude.transcriptLanguage(),
+      reviewPrompt: reviewPrompt(),
+      reviewPromptDefault: REVIEW_PROMPT,
       transcriptLanguages: claude.TRANSCRIPT_LANGUAGES,
       incidentPattern: settingsOf("incidents", { channelPattern: "^(inc|incident)[-_]" }).channelPattern,
       focus: focus ? { on: true, until: focus.until } : { on: false },

@@ -1,7 +1,8 @@
 // ---------------------------------------------------------------------------------------------
 // Powertoys (local addition): features of Slack's message box (started by powertoys/page).
 //
-//   - Pasting a link (Notion, GitHub, any page with a title) pastes it as its title, linked.
+//   - Pasting a link (Notion, GitHub, any page with a title): the link goes in at once, and its title replaces its
+//     text, linked, once known (if it is still in the message box).
 //   - Secret guard: before a message goes, it is checked here (nothing leaves the computer) for things like API keys,
 //     tokens, private keys and .env lines; you can redact them, send anyway, or cancel.
 //   - Snippets: type ;; in the message box to pick one (powertoys\snippets.json; {{commits}}, {{date}}, {{ai: ...}}).
@@ -16,30 +17,68 @@
   // --- Pasting links as titles -----------------------------------------------------------------------------
   const SINGLE_URL = /^https?:\/\/\S+$/;
   let ownPaste = false;
+  // The link goes in at once, as Slack pastes it, so a message sent right away has it; once the page's title is known
+  // it replaces the link's text, if that is still in the message box (not sent, not edited away) and the box still
+  // has the focus.
   async function onPaste(event) {
     const editor = editorOf(event.target);
     if (!editor || ownPaste) return;
     const text = event.clipboardData?.getData("text/plain")?.trim() ?? "";
     if (!SINGLE_URL.test(text) || event.clipboardData.getData("text/html")) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
     let title = null;
     try {
       title = await Promise.race([page.invoke("link-title", text), new Promise((resolve) => setTimeout(() => resolve(null), 4000))]);
     } catch {}
-    // Slack's editor ignores a made-up paste event, but takes inserted HTML: a link is kept as a link.
-    editor.focus();
+    if (title) titleLink(editor, text, title);
+  }
+
+  function titleLink(editor, url, title) {
+    if (!editor.isConnected || document.activeElement !== editor) return;
+    // Slack turns a pasted address into a link chip (<ts-slug data-url>, showing it without "https://"); else it is text.
+    const slug = [...editor.querySelectorAll("ts-slug[data-url]")].find((each) => each.dataset.url === url);
+    const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+    let node = slug ? null : walker.nextNode();
+    while (node && !node.textContent.includes(url)) node = walker.nextNode();
+    if (!slug && !node) return;
+    const selection = getSelection();
+    const caret = selection.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
+    const atEnd = (() => {
+      if (!caret) return true;
+      const rest = document.createRange();
+      rest.setStart(caret.endContainer, caret.endOffset);
+      rest.setEnd(editor, editor.childNodes.length);
+      return !rest.toString().trim();
+    })();
+    const range = document.createRange();
+    const anchor = node?.parentElement?.closest("a");
+    if (slug) range.selectNode(slug);
+    else if (anchor && editor.contains(anchor) && anchor.textContent.trim() === url) range.selectNode(anchor);
+    else {
+      const at = node.textContent.indexOf(url);
+      range.setStart(node, at);
+      range.setEnd(node, at + url.length);
+    }
+    selection.removeAllRanges();
+    selection.addRange(range);
+    // Slack's editor takes inserted HTML (a made-up paste event it ignores): a link is kept as a link.
+    const escape = (value) => value.replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" })[c]);
     ownPaste = true;
     try {
-      if (title) {
-        const escape = (value) => value.replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" })[c]);
-        document.execCommand("insertHTML", false, `<a href="${escape(text)}">${escape(title)}</a>&nbsp;`);
-      } else {
-        document.execCommand("insertText", false, text);
-      }
+      document.execCommand("insertHTML", false, `<a href="${escape(url)}">${escape(title)}</a>`);
     } finally {
       ownPaste = false;
     }
+    // The caret back where it was: at the end if it was there, else in its place if that is still in the box.
+    const back = document.createRange();
+    if (atEnd || !caret.startContainer.isConnected) {
+      back.selectNodeContents(editor);
+      back.collapse(false);
+    } else {
+      back.setStart(caret.startContainer, Math.min(caret.startOffset, caret.startContainer.length ?? caret.startContainer.childNodes.length));
+      back.collapse(true);
+    }
+    selection.removeAllRanges();
+    selection.addRange(back);
   }
 
   // --- Secret guard ----------------------------------------------------------------------------------------

@@ -94,8 +94,8 @@ patches/files/...           files that are entirely new (written for Powertoys),
 - **Developer features** (they use Claude through the Claude Code CLI, signed in as you, with a lean prompt; Notion
   through the Powertoys panel's Settings tab (Ctrl+Alt+P): sign in with an OAuth connection whose redirect URI is
   `http://localhost:47821/notion/callback`, or paste an internal integration's secret; GitHub through the `gh` CLI):
-  - **Notion:** link previews (title, path, status, assignees, last edit, first lines); pasting a link pastes its
-    title, linked (Notion, GitHub, or any page's title); **Save to Notion** in the message menu (a thread, huddle or
+  - **Notion:** link previews (title, path, status, assignees, last edit, first lines); a pasted link goes in
+    at once, and its title, linked, replaces it once known (Notion, GitHub, or any page's title); **Save to Notion** in the message menu (a thread, huddle or
     clip, summarized with decisions and action items); **Draft a postmortem in Notion** in incident channels. Claude
     picks where each new page goes (an Incidents database for a postmortem, say) among the pages you shared.
   - **Claude in Slack:** a catch-up digest (tray, panel, or daily); **Explain** for selected text; **Draft a reply with
@@ -103,7 +103,8 @@ patches/files/...           files that are entirely new (written for Powertoys),
     context and tone.
   - **Code:** code blocks get Copy, Open in editor, Run in terminal (asks first), Gist (asks first) and Send to
     Claude Code; files named in a message (stack traces) open in your editor; GitHub pull request, issue and Actions
-    run cards update live, with Ask Claude to review and Watch (a reminder when the run ends).
+    run cards update live, with Ask Claude to review (its prompt set in the panel's Settings tab; by default "Review
+    the PR {pr} focusing only on major business logic issues. No nit-picking") and Watch (a reminder when the run ends).
   - **Agents:** a panel (Ctrl+Alt+P) with your Claude Code sessions; a session's permission request can be allowed or
     denied from Slack (or with `y`/`n` in a thread of your DM, from your phone); **Make this a Claude Code task**
     starts a session in the workspace's folder that drafts its result into the thread; **Create an issue with Claude**

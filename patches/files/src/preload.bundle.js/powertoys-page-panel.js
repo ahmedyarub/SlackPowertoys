@@ -30,7 +30,7 @@
     .panel-body .row { padding: 6px 4px; border-bottom: 1px solid rgba(255,255,255,.06); }
     .panel-body .row .sub { opacity: .7; font-size: 12px; }
     .panel-body .group { margin: 8px 0 4px; font-weight: 700; }
-    .panel-body input, .panel-body select { font: inherit; width: 100%; box-sizing: border-box; padding: 6px 8px; border-radius: 4px;
+    .panel-body input, .panel-body select, .panel-body textarea { font: inherit; width: 100%; box-sizing: border-box; padding: 6px 8px; border-radius: 4px;
       border: 1px solid rgba(255,255,255,.2); background: #222529; color: #fff; }
     .panel-body button.act { font: inherit; font-weight: 700; color: #fff; background: #007a5a; border: 0; border-radius: 4px; padding: 4px 10px; cursor: pointer; margin-top: 6px; }
     .panel-body .link { color: #1d9bd1; cursor: pointer; }
@@ -271,7 +271,30 @@
       }
     });
 
+    // The prompt "Ask Claude to review" sends ({pr}: the pull request's link); empty is the default.
+    const reviewLabel = Object.assign(el("label", "", "Prompt for “Ask Claude to review”"), { htmlFor: "powertoys-review-prompt" });
+    const review = Object.assign(el("textarea"), { id: "powertoys-review-prompt", rows: 3, value: current.reviewPrompt ?? "", placeholder: current.reviewPromptDefault ?? "" });
+    review.setAttribute("aria-describedby", "powertoys-review-prompt-help");
+    const reviewHelp = Object.assign(el("div", "sub", "{pr} is replaced by the pull request's link. Empty: the default."), { id: "powertoys-review-prompt-help" });
+    const reviewSave = el("button", "act", "Save prompt");
+    const reviewStatus = Object.assign(el("div", "sub"), { role: "status" });
+    reviewStatus.setAttribute("aria-live", "polite");
+    reviewSave.addEventListener("click", async () => {
+      try {
+        review.value = (await page.invoke("review-prompt", { prompt: review.value })).prompt;
+        reviewStatus.textContent = "Saved.";
+      } catch (caught) {
+        reviewStatus.textContent = `Not saved: ${page.reason(caught)}`;
+      }
+    });
+
     body.append(
+      heading("Code review"),
+      reviewLabel,
+      review,
+      reviewHelp,
+      reviewSave,
+      reviewStatus,
       heading("Transcription"),
       languageLabel,
       language,
