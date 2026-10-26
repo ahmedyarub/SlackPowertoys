@@ -23,10 +23,11 @@
     .panel { position: fixed; z-index: 2147483645; right: 16px; top: 64px; width: 420px; max-height: 70vh; display: flex; flex-direction: column;
       border-radius: 10px; background: #1a1d21; color: #d1d2d3; font: 13px/1.45 Lato, "Segoe UI", sans-serif;
       box-shadow: 0 0 0 1px rgba(255,255,255,.13), 0 10px 30px rgba(0,0,0,.5); }
-    .panel-head { display: flex; align-items: center; gap: 4px; padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.1); }
+    .panel-head { display: flex; align-items: flex-start; gap: 4px; padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.1); }
+    .panel-head .tabs { display: flex; flex-wrap: wrap; gap: 2px 4px; flex: 1; min-width: 0; }
     .panel-head .tab { background: none; border: 0; color: #d1d2d3; padding: 4px 8px; border-radius: 4px; cursor: pointer; font: inherit; }
     .panel-head .tab.on { background: #1264a3; color: #fff; }
-    .panel-head .close { margin-left: auto; background: none; border: 0; color: #d1d2d3; font-size: 18px; cursor: pointer; }
+    .panel-head .close { flex: none; margin-left: auto; background: none; border: 0; color: #d1d2d3; font-size: 18px; cursor: pointer; }
     .panel-body { padding: 10px; overflow: auto; }
     .panel-body .row { padding: 6px 4px; border-bottom: 1px solid rgba(255,255,255,.06); }
     .panel-body .row .sub { opacity: .7; font-size: 12px; }
@@ -63,14 +64,17 @@
     const root = page.ui();
     panel = el("div", "panel");
     const head = el("div", "panel-head");
+    // The tabs wrap onto a second line when they don't fit (a larger zoom, or more tabs).
+    const tabs = el("div", "tabs");
     for (const [name, label] of [["agents", "Agents"], ["search", "Search"], ["focus", "Focus"], ["digest", "Digest"], ["recordings", "Recordings"], ["history", "History"], ["settings", "Settings"]]) {
       const button = el("button", `tab${tab === name ? " on" : ""}`, label);
       button.addEventListener("click", () => ((tab = name), toggle(true)));
-      head.append(button);
+      tabs.append(button);
     }
     const close = el("button", "close", "×");
+    close.setAttribute("aria-label", "Close the Powertoys panel");
     close.addEventListener("click", () => toggle(false));
-    head.append(close);
+    head.append(tabs, close);
     const body = el("div", "panel-body");
     panel.append(head, body);
     root.appendChild(panel);

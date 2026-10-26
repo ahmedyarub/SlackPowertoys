@@ -356,7 +356,7 @@
   {
    "path": "src/preload.bundle.js/powertoys-page-panel.js",
    "kind": "add",
-   "sha256": "9440d4fe43d88e1cbc1770084ab64f5385bb8dbb502e9af03e1b837073eeac68"
+   "sha256": "b0d35e4558afba7c43559073beb81d87981144de938c3276836dfd62abcefec9"
   },
   {
    "path": "src/preload.bundle.js/powertoys-page.js",
