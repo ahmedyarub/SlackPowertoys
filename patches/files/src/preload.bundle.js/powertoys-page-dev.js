@@ -98,6 +98,7 @@
     // A message with a video or audio clip: its transcript attached, the video only by its link.
     page.addMessageMenuItem({
       label: "Share video with Claude",
+      inFileMenu: true,
       show: ({ element }) => !!element.querySelector('video, audio, [data-qa*="video"], [data-qa*="audio"], [data-qa*="clip"], [data-qa*="media_player"]'),
       run: async ({ link, teamId }) => {
         try {

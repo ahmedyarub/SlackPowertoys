@@ -309,7 +309,8 @@
   // --- Items in Slack's message menu ----------------------------------------------------------------------
   // Slack draws the menu (.p-message_actions_menu) when a message is right-clicked or its "More actions" clicked; the
   // message is the list item the click was in, and its timestamp link is its permalink. Page modules add items with
-  // addMessageMenuItem({ label, show(message), run(message) }); a message is { link, teamId, text, element }.
+  // addMessageMenuItem({ label, show(message), run(message), inFileMenu }); a message is { link, teamId, text,
+  // element }. inFileMenu: also in the menu of a file in the message (its ⋮).
   let lastMessage = null;
   function rememberMessage(event) {
     const item = event.target.closest?.('[data-qa="virtual-list-item"]');
@@ -327,21 +328,34 @@
   const menuItems = [];
   exports.addMessageMenuItem = (item) => menuItems.push(item);
 
-  function addMenuItems(menu) {
+  // The message's menu gets every item; a file's own menu (the ⋮ on a video: Download, Share file…, Copy link) gets
+  // the items meant for files ({ inFileMenu: true }), after its "Copy link".
+  function addMenuItems(menu, fileMenu = false) {
     if (!lastMessage || Date.now() - lastMessage.at > 5000 || menu.querySelector(".powertoys-menu-item")) return;
     let after = menu.querySelector('[data-qa="copy_link-wrapper"]');
-    if (!after) return;
+    if (!after && fileMenu) {
+      const copy = [...menu.querySelectorAll('[role="menuitem"]')].find((each) => each.textContent.trim() === "Copy link");
+      after = copy?.closest('[data-qa$="-wrapper"]') ?? copy?.parentElement;
+    }
+    if (!after) return log(`a ${fileMenu ? "file" : "message"} menu without "Copy link": nothing added`);
+    if (fileMenu) log(`file menu: items added after ${after.dataset.qa ?? after.className}`);
     const message = lastMessage;
     for (const item of menuItems) {
+      if (fileMenu && !item.inFileMenu) continue;
       if (item.show && !item.show(message)) continue;
       const wrapper = after.cloneNode(true);
       wrapper.dataset.qa = `powertoys_${item.label.toLowerCase().replace(/\W+/g, "_")}-wrapper`;
       wrapper.classList.add("powertoys-menu-item");
       for (const node of wrapper.querySelectorAll("[id]")) node.removeAttribute("id");
+      // The item copied may be the highlighted one (under the mouse): the copy starts plain, and highlights on hover.
+      for (const node of [wrapper, ...wrapper.querySelectorAll("[class]")]) {
+        for (const name of [...node.classList]) if (/--(highlighted|selected|active|focused)$/.test(name)) node.classList.remove(name);
+      }
       wrapper.querySelector(".c-menu_item__shortcut")?.remove();
       const icon = wrapper.querySelector(".c-menu_item__icon");
       if (icon) icon.innerHTML = SPARKLE;
-      wrapper.querySelector(".c-menu_item__label").textContent = item.label;
+      const label = wrapper.querySelector(".c-menu_item__label") ?? [...wrapper.querySelectorAll("*")].findLast((node) => !node.children.length && node.textContent.trim()) ?? wrapper;
+      label.textContent = item.label;
       const button = wrapper.querySelector("button") ?? wrapper;
       button.addEventListener("click", (event) => {
         event.preventDefault();
@@ -494,6 +508,7 @@
       document.addEventListener("mousedown", (event) => event.composedPath().includes(host) || closeMenu(), true);
       document.addEventListener("contextmenu", rememberMessage, true);
       document.addEventListener("click", rememberMessage, true);
+      document.addEventListener("pointerdown", rememberMessage, true);
       const style = document.createElement("style");
       style.textContent = PAGE_STYLE;
       document.head.appendChild(style);
@@ -511,6 +526,12 @@
             if (node.nodeType !== 1) continue;
             const menus = node.matches(".p-message_actions_menu") ? [node] : node.querySelectorAll(".p-message_actions_menu");
             for (const menu of menus) addMenuItems(menu);
+            // A file's own menu: told apart by its "Share file…" item.
+            const lists = node.matches('[role="menu"]') ? [node] : node.querySelectorAll('[role="menu"]');
+            for (const list of lists) {
+              if (list.closest(".p-message_actions_menu")) continue;
+              if ([...list.querySelectorAll('[role="menuitem"]')].some((each) => /^Share file/.test(each.textContent.trim()))) addMenuItems(list, true);
+            }
           }
       }).observe(document.body, { childList: true, subtree: true });
       // A huddle ringing or about to start in this window (an incoming huddle's card, or the screen before joining or

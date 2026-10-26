@@ -75,11 +75,10 @@
 
   // --- Sharing a video posted in Slack with Claude ---------------------------------------------------------
   /**
-   * Like sharing a recording: a Claude Code session (one of the workspace's linked folder's, or a new one there, else
-   * in Powertoys' folder) gets the
-   * video's Slack transcript attached (an @ mention of a file saved under powertoys\transcripts; Slack is asked for
-   * one and waited on, up to 3 minutes, if there's none yet) and the video only by its link, to save with
-   * slack-powertoys' save_slack_file and look at only when the transcript isn't enough.
+   * Just like sharing a recording: the video is saved to <recordings folder>\From Slack\ with its Slack transcript
+   * beside it (Slack is asked for one and waited on, up to 3 minutes, if there's none yet); a Claude Code session (one
+   * of the workspace's linked folder's, or a new one there, else in the recordings folder) gets the transcript
+   * attached and the video's path, to look at only when the transcript isn't enough.
    */
   async function shareClip({ link, teamId, sessionId = null }) {
     let { clips } = await claude.clipTranscripts({ clip: link });
@@ -93,21 +92,26 @@
       }
       if (clips.some((clip) => !clip.lines.length)) throw new Error("Slack has no transcript for the video yet; try again in a few minutes");
     }
-    const folder = path.join(powertoysDir(), "transcripts");
+    const recordings = readSettings().huddle?.recordingsFolder || path.join(powertoysDir(), "recordings");
+    const folder = path.join(recordings, "From Slack");
     fs.mkdirSync(folder, { recursive: true });
     const clock = (ms) => `${String(Math.floor(ms / 60000)).padStart(2, "0")}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
-    const transcripts = clips.map((clip) => {
-      const file = path.join(folder, `${clip.id} ${String(clip.title).replace(/[\\/:*?"<>|]/g, "_").slice(0, 80)}.transcript.txt`);
-      fs.writeFileSync(file, `${clip.title}, by ${clip.author}, ${clip.created}\n\n${clip.lines.map((line) => `[${clock(line.start)}] ${line.text}`).join("\n")}\n`);
-      return { clip, file };
-    });
+    const shared = [];
+    for (const clip of clips) {
+      const base = path.join(folder, `${clip.created.slice(0, 10)} ${clip.author} ${String(clip.title).replace(/\.\w+$/, "")}`.replace(/[\\/:*?"<>|]/g, "_").slice(0, 150));
+      send("powertoys:notice", { text: `Saving "${clip.title}" for Claude…` });
+      const video = await claude.saveFile({ file: clip.id, host: new URL(link).hostname, to: base });
+      const transcript = `${base}.transcript.txt`;
+      fs.writeFileSync(transcript, `${clip.title}, by ${clip.author}, ${clip.created}\n\n${clip.lines.map((line) => `[${clock(line.start)}] ${line.text}`).join("\n")}\n`);
+      shared.push({ clip, video, transcript });
+    }
     const prompt =
-      `A ${clips.length > 1 ? "message with videos" : "video"} was posted in Slack: ${link}\n\n` +
-      transcripts.map(({ clip, file }) => `"${clip.title}" (${clip.kind}, by ${clip.author}): transcript attached: @"${file}"; the ${clip.kind} itself: ${clip.permalink}`).join("\n") +
+      `${clips.length > 1 ? "Videos were" : "A video was"} posted in Slack (${link}).\n\n` +
+      shared.map(({ clip, video, transcript }) => `"${clip.title}" (${clip.kind}, by ${clip.author}, ${clip.created.slice(0, 10)}). Its transcript is attached: @"${transcript}"\nThe ${clip.kind} is at "${video}".`).join("\n\n") +
       "\n\nWork from the transcript. Only when the transcript isn't enough for something (what was on screen, or speech it got wrong), " +
-      "save the video with slack-powertoys' save_slack_file and look at it, only at the parts you need.\n\n" +
+      "look at the video, and only at the parts you need.\n\n" +
       "Tell me in a few lines what it is about, then wait for my questions.";
-    const where = folderOf(teamId) ?? powertoysDir();
+    const where = folderOf(teamId) ?? folder;
     log(`sharing ${clips.length} clip${clips.length === 1 ? "" : "s"} with Claude (${sessionId ? `session ${sessionId}` : "a new Code session"} in ${where})`);
     return toClaude({ prompt, folder: where, sessionId });
   }
