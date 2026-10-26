@@ -85,6 +85,9 @@
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: opacity .2s; }
       .chip:hover, .chip.open { opacity: 1; }
       .rec { bottom: 102px; }
+      .mark { bottom: 128px; }
+      .mark.done { opacity: 1; color: #fff; background: #2eb67d; }
+      .brief { bottom: 154px; }
       .rec.on { opacity: 1; color: #fff; background: #e01e5a; }
       .rec.alarm { opacity: 1; color: #1d1c1d; background: #ecb22e; }
       .menu { position: fixed; z-index: 2147483647; min-width: 240px; max-width: 360px; max-height: 50vh; overflow: auto; padding: 4px 0;
@@ -479,6 +482,69 @@
       }
     }, 3000);
 
+    // Every caption line, with who said it and when it first showed, for the recording's speaker-named transcript
+    // (sent again while Slack corrects a line's words).
+    const captions = new WeakMap(); // line element -> { id, name, text, at }
+    let captionCount = 0;
+    setInterval(() => {
+      let name = "";
+      for (const line of document.querySelectorAll(LINE)) {
+        name = nameOf(line) || name;
+        const text = textOf(line);
+        if (!text) continue;
+        let caption = captions.get(line);
+        if (!caption) captions.set(line, (caption = { id: ++captionCount, at: Date.now(), name: "", text: "" }));
+        if (caption.text === text && caption.name === name) continue;
+        Object.assign(caption, { name, text });
+        send({ type: "caption", ...caption });
+      }
+    }, 2000);
+    const lastLines = (count) => {
+      let name = "";
+      const said = [];
+      for (const line of document.querySelectorAll(LINE)) {
+        name = nameOf(line) || name;
+        if (textOf(line)) said.push(`${name ? `${name}: ` : ""}${textOf(line)}`);
+      }
+      return said.slice(-count);
+    };
+
+    // "★ Mark" (or Ctrl+Shift+M): this moment, with the last caption lines, becomes a chapter of the recording.
+    const mark = el("button", "chip mark", "★ Mark");
+    mark.tabIndex = -1;
+    mark.title = "Mark this moment in the recording (Ctrl+Shift+M)";
+    const markNow = () => send({ type: "mark", lines: lastLines(3) });
+    mark.addEventListener("mousedown", (event) => (event.preventDefault(), markNow()));
+    document.addEventListener("keydown", (event) => event.ctrlKey && event.shiftKey && event.code === "KeyM" && (event.preventDefault(), markNow()), true);
+    root.appendChild(mark);
+
+    // "Brief": what to know before talking (the conversation, its tickets, the last call), or the standup's summary.
+    const brief = el("button", "chip brief", "Brief");
+    brief.tabIndex = -1;
+    brief.title = "A short brief for this call";
+    let briefBox = null;
+    const showBrief = (text) => {
+      briefBox?.remove();
+      briefBox = el("div", "answer");
+      const top = el("div", "top");
+      const close = el("button", "", "×");
+      close.addEventListener("mousedown", (event) => (event.preventDefault(), briefBox.remove(), (briefBox = null)));
+      top.append(el("span", "", "Brief"), close);
+      const log = el("div", "log");
+      log.append(Object.assign(el("div", "text"), {}));
+      log.firstChild.append(typeof text === "string" ? markdown(text) : text);
+      briefBox.append(top, log);
+      briefBox.style.left = "10px";
+      briefBox.style.top = `${Math.max(8, innerHeight - 560)}px`;
+      root.appendChild(briefBox);
+    };
+    brief.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      showBrief("Preparing the brief…");
+      send({ type: "brief" });
+    });
+    root.appendChild(brief);
+
     window.__powertoys = {
       receive(message) {
         if (message.type === "sessions") {
@@ -492,6 +558,13 @@
         } else if (message.type === "assigned") {
           session = message.session ?? NEW;
           showChip();
+        } else if (message.type === "marked") {
+          // Said on the chip for a moment: "★ 12:34" (or why not).
+          mark.textContent = message.error ? `★ ${message.error}` : `★ Marked ${message.time}`;
+          mark.classList.toggle("done", !message.error);
+          setTimeout(() => ((mark.textContent = "★ Mark"), mark.classList.remove("done")), 2500);
+        } else if (message.type === "brief") {
+          showBrief(message.error ? `Couldn't prepare the brief: ${message.error}` : message.markdown);
         } else if (message.type === "recording") {
           rec.disabled = false;
           recordingSince = message.since ?? null;
@@ -512,6 +585,8 @@
   // --- The main process's half -------------------------------------------------------------------------------
   const huddles = new Map(); // web contents id -> { folder, session }
   const reply = (contents, message) => !contents.isDestroyed() && contents.executeJavaScript(`window.__powertoys?.receive(${JSON.stringify(message)})`).catch(() => {});
+
+  const currentTeamId = () => /\/client\/([A-Z0-9]+)/.exec(slackPage()?.getURL() ?? "")?.[1] ?? null;
 
   /** The workspace the Slack page shows (/client/T.../), and its folder. */
   function currentFolder() {
@@ -542,6 +617,33 @@
       log(`huddle: questions go to "${chosen?.title ?? "a new session"}"`);
     } else if (message.type === "log") {
       log(`huddle window: ${String(message.text).slice(0, 300)}`);
+    } else if (message.type === "caption") {
+      // Appended as it comes (a crash keeps it); the last version of each line is the one used.
+      const recording = recordings.get(contents.id);
+      if (recording) {
+        try {
+          fs.appendFileSync(`${recording.base}.captions.jsonl`, `${JSON.stringify({ id: message.id, at: message.at, name: message.name, text: message.text })}\n`);
+        } catch (caught) {
+          if (!recording.captionsBroken) warn(`recording: couldn't keep the captions (${caught.message})`);
+          recording.captionsBroken = true;
+        }
+      }
+    } else if (message.type === "mark") {
+      const recording = recordings.get(contents.id);
+      if (!recording) return reply(contents, { type: "marked", error: "not recording" });
+      const seconds = Math.floor((Date.now() - recording.since) / 1000);
+      recording.marks.push({ at: Date.now(), lines: (message.lines ?? []).slice(-3).map(String) });
+      writeStatus(recording, recording.status ?? "recording");
+      log(`recording: marked ${seconds} s in`);
+      reply(contents, { type: "marked", time: `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}` });
+    } else if (message.type === "brief") {
+      try {
+        const where = electron.BrowserWindow.fromWebContents(contents)?.getTitle().split(" - ")[0] ?? "";
+        reply(contents, { type: "brief", markdown: await __webpack_require__("powertoys/brief").forCall({ where, teamId: currentTeamId() }) });
+      } catch (caught) {
+        warn(`brief: ${caught.message}`);
+        reply(contents, { type: "brief", error: caught.message });
+      }
     } else if (message.type === "record") {
       if (recordings.has(contents.id)) await stopRecording(contents, false);
       else await startRecording(contents);
@@ -887,6 +989,7 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
       // (only what the file needs: a live call also holds its file handle, timer and callbacks)
       calls: (recording.calls ?? saved.calls ?? []).map(({ file, startedAt }) => ({ file, startedAt })),
       callStats: recording.callStats ?? saved.callStats ?? null,
+      marks: recording.marks ?? saved.marks ?? [],
       check: recording.check ?? saved.check ?? null,
     };
     fs.writeFileSync(`${json}.tmp`, JSON.stringify({ ...saved, ...fields }, null, 2));
@@ -932,8 +1035,7 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
       );
       const sound = recorderOf(screen.getAudioTracks(), ["audio/webm;codecs=opus"]);
       if (!main && !sound) throw new Error("nothing to record: no picture, microphone or sound");
-      const base64 = async (recorder) => {
-        const blob = new Blob(recorder?.chunks.splice(0) ?? []);
+      const blobBase64 = async (blob) => {
         if (!blob.size) return "";
         const url = await new Promise((resolve) => {
           const reader = new FileReader();
@@ -942,8 +1044,39 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
         });
         return url.slice(url.indexOf(",") + 1);
       };
-      // What was recorded since the last call, as base64, and whether a recorder failed.
-      window.takeRecorded = async () => ({ data: await base64(main), sound: await base64(sound), failed });
+      const base64 = (recorder) => blobBase64(new Blob(recorder?.chunks.splice(0) ?? []));
+      // Key frames: every 2 s a small grey copy of the picture is compared with the last frame kept; a big change (a
+      // new slide, another screen shared), 15 s or more after the last one, keeps a full-size JPEG.
+      const frames = [];
+      if (withVideo) {
+        const video = Object.assign(document.createElement("video"), { muted: true, srcObject: new MediaStream(screen.getVideoTracks()) });
+        await video.play().catch(() => {});
+        const small = new OffscreenCanvas(160, 90);
+        const smallContext = small.getContext("2d", { willReadFrequently: true });
+        let kept = null;
+        let keptAt = 0;
+        setInterval(async () => {
+          if (!video.videoWidth || Date.now() - keptAt < 15000) return;
+          smallContext.drawImage(video, 0, 0, 160, 90);
+          const pixels = smallContext.getImageData(0, 0, 160, 90).data;
+          const grey = new Uint8Array(160 * 90);
+          for (let i = 0; i < grey.length; i++) grey[i] = (pixels[i * 4] * 3 + pixels[i * 4 + 1] * 6 + pixels[i * 4 + 2]) / 10;
+          let change = 255;
+          if (kept) {
+            change = 0;
+            for (let i = 0; i < grey.length; i++) change += Math.abs(grey[i] - kept[i]);
+            change /= grey.length;
+          }
+          if (change < 12) return;
+          kept = grey;
+          keptAt = Date.now();
+          const full = new OffscreenCanvas(video.videoWidth, video.videoHeight);
+          full.getContext("2d").drawImage(video, 0, 0);
+          frames.push({ at: keptAt, data: await blobBase64(await full.convertToBlob({ type: "image/jpeg", quality: 0.85 })) });
+        }, 2000);
+      }
+      // What was recorded since the last call, as base64, the key frames, and whether a recorder failed.
+      window.takeRecorded = async () => ({ data: await base64(main), sound: await base64(sound), frames: frames.splice(0), failed });
       const stopped = (recorder) =>
         new Promise((resolve) => {
           if (!recorder || recorder.state === "inactive") return resolve(true);
@@ -1020,7 +1153,17 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
    * own folder and goes on there, so nothing recorded is lost.
    */
   async function writeRecorded(recording, part) {
-    const { data, sound, failed } = await inRecorder(part, "window.takeRecorded()");
+    const { data, sound, frames = [], failed } = await inRecorder(part, "window.takeRecorded()");
+    // Key frames, named by their time from the recording's start (a refused write loses only that frame).
+    for (const frame of frames) {
+      try {
+        const folder = `${recording.base}.frames`;
+        fs.mkdirSync(folder, { recursive: true });
+        fs.writeFileSync(path.join(folder, `${clock(frame.at - recording.since).replace(":", "-")}.jpg`), Buffer.from(frame.data, "base64"));
+      } catch (caught) {
+        warn(`recording: a key frame wasn't saved (${caught.message})`);
+      }
+    }
     // The computer's sound is a backup: a refused write is reported once, and the part goes on.
     if (sound && !part.soundBroken) {
       try {
@@ -1288,6 +1431,7 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
       sounds: {},
       calls: [],
       callStats: { seconds: 0, heard: 0, playing: 0, missed: 0, peak: 0, restarts: 0 },
+      marks: [],
     };
     recordings.set(contents.id, recording);
     // The call's sound first: Slack's own, whatever speaker it plays on.
@@ -1458,6 +1602,14 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
       if (!problems.length && recorded > 0 && callSeconds >= recorded - 1) for (const call of callFiles) fs.rmSync(call.file, { force: true });
       else if (recorded > 0) warn(`recording: the call's sound is kept beside the recording (${Math.round(recorded)} s recorded, ${Math.round(callSeconds)} s in the parts)`);
     }
+    // The speaker-named transcript (from the captions), the marked moments as chapters, the key frames' list.
+    for (const [what, step] of [["captions", captionsTranscript], ["marks", addMarks], ["frames", indexFrames]]) {
+      try {
+        await step(recording);
+      } catch (caught) {
+        warn(`recording: ${what}: ${caught.message}`);
+      }
+    }
     const stats = recording.callStats;
     const checks = [];
     const span = (seconds) => (seconds < 90 ? `${Math.round(seconds)} s` : `${Math.round(seconds / 60)} min`);
@@ -1573,7 +1725,7 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
    * with its subtitles; otherwise the part is left as it was.
    */
   const SUBTITLE_LANGUAGES = { en: "eng", de: "ger", es: "spa", fr: "fre", it: "ita", pt: "por", ja: "jpn", ko: "kor", zh: "chi" };
-  async function addSubtitles(file, lines) {
+  async function addSubtitles(file, lines, title = "Transcript (Slack)") {
     if (!lines.length) return;
     const time = (ms) => {
       const pad = (n, width = 2) => String(n).padStart(width, "0");
@@ -1584,18 +1736,104 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     const copy = `${file}.subtitled.mkv`;
     const language = SUBTITLE_LANGUAGES[claude.transcriptLanguage().slice(0, 2)] ?? "und";
     try {
-      await execFile("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", file, "-i", srt, "-map", "0", "-map", "-0:s", "-map", "1", "-c", "copy", "-c:s", "srt", "-metadata:s:s:0", `language=${language}`, "-metadata:s:s:0", "title=Transcript (Slack)", "-f", "matroska", copy]);
+      // Other subtitle tracks stay (the captions' and Slack's transcript live side by side); one of the same title goes.
+      const existing = JSON.parse(await execFile("ffprobe", ["-v", "error", "-show_entries", "stream=index,codec_type:stream_tags=title", "-of", "json", file])).streams ?? [];
+      const subtitles = existing.filter((stream) => stream.codec_type === "subtitle");
+      const replaced = subtitles.filter((stream) => stream.tags?.title === title);
+      const at = subtitles.length - replaced.length; // the new track's number among the subtitles
+      await execFile("ffmpeg", [
+        "-hide_banner", "-loglevel", "error", "-y", "-i", file, "-i", srt,
+        "-map", "0", ...replaced.flatMap((stream) => ["-map", `-0:${stream.index}`]), "-map", "1",
+        "-c", "copy", "-c:s", "srt", `-metadata:s:s:${at}`, `language=${language}`, `-metadata:s:s:${at}`, `title=${title}`, "-f", "matroska", copy,
+      ]);
       const probe = JSON.parse(await execFile("ffprobe", ["-v", "error", "-show_entries", "format=duration:stream=codec_type", "-of", "json", copy]));
       const duration = Number(probe.format?.duration);
       if (!(duration > 0) || !probe.streams?.some((stream) => stream.codec_type === "subtitle")) throw new Error("the copy with subtitles isn't complete");
       fs.renameSync(copy, file);
-      log(`recording subtitled: ${file} (${lines.length} lines)`);
+      log(`recording subtitled: ${file} (${title}, ${lines.length} lines)`);
     } catch (caught) {
       fs.rmSync(copy, { force: true });
       warn(`recording: ${file} kept without subtitles (${caught.message})`);
     } finally {
       fs.rmSync(srt, { force: true });
     }
+  }
+
+  /** The captions seen during a recording (powertoys appended each version of a line): the last of each, in order. */
+  function captionLines(recording) {
+    const file = `${recording.base}.captions.jsonl`;
+    if (!fs.existsSync(file)) return [];
+    const latest = new Map();
+    for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+      try {
+        const caption = JSON.parse(line);
+        latest.set(caption.id, caption);
+      } catch {}
+    }
+    return [...latest.values()].filter((caption) => caption.text).sort((a, b) => a.at - b.at);
+  }
+
+  /**
+   * The speaker-named transcript, from the captions: <recording>.captions.txt ("[mm:ss] Name: words", from the
+   * recording's start), and a subtitle track "Captions (speakers)" in each part -> the file, or null without captions.
+   */
+  async function captionsTranscript(recording) {
+    const lines = captionLines(recording);
+    if (!lines.length) return null;
+    const file = `${recording.base}.captions.txt`;
+    fs.writeFileSync(file, `${recording.where ?? "Huddle"}, ${new Date(recording.since).toLocaleString()} (from Slack's live captions, with who spoke)\n\n${lines.map((line) => `[${clock(line.at - recording.since)}] ${line.name ? `${line.name}: ` : ""}${line.text}`).join("\n")}\n`);
+    for (const part of recording.parts) {
+      const start = recording.starts?.[part];
+      if (!start || !/\.mkv$/.test(part)) continue;
+      const inPart = lines.map((line, i) => ({ start: line.at - start, end: (lines[i + 1]?.at ?? line.at + 4000) - start, text: `${line.name ? `${line.name}: ` : ""}${line.text}` })).filter((line) => line.end > 0);
+      await addSubtitles(part, inPart.map((line) => ({ ...line, start: Math.max(0, line.start) })), "Captions (speakers)");
+    }
+    log(`recording: speaker-named transcript from ${lines.length} captions: ${file}`);
+    return file;
+  }
+
+  /** The key frames kept while recording (<recording>.frames\mm-ss.jpg): their list, <recording>.frames\index.txt. */
+  function indexFrames(recording) {
+    const folder = `${recording.base}.frames`;
+    if (!fs.existsSync(folder)) return null;
+    const names = fs.readdirSync(folder).filter((name) => name.endsWith(".jpg")).sort();
+    if (!names.length) return null;
+    fs.writeFileSync(path.join(folder, "index.txt"), `Stills of the huddle window when it changed a lot (a new slide, another screen shared), by time from the recording's start:\n${names.map((name) => `${name.slice(0, -4).replace("-", ":")}  ${name}`).join("\n")}\n`);
+    log(`recording: ${names.length} key frame${names.length === 1 ? "" : "s"} in ${folder}`);
+    return folder;
+  }
+
+  /** The marks as chapters of each part ("★ mm:ss Name: words"), and in <recording>.marks.txt. */
+  async function addMarks(recording) {
+    const marks = recording.marks ?? [];
+    if (!marks.length) return null;
+    const title = (mark) => `★ ${clock(mark.at - recording.since)} ${mark.lines.at(-1) ?? ""}`.slice(0, 120);
+    const file = `${recording.base}.marks.txt`;
+    fs.writeFileSync(file, `Moments marked during the huddle (time from the recording's start; the caption lines just before)\n\n${marks.map((mark) => `[${clock(mark.at - recording.since)}]\n${mark.lines.map((line) => `  ${line}`).join("\n")}`).join("\n\n")}\n`);
+    for (const part of recording.parts) {
+      const start = recording.starts?.[part];
+      if (!start || !/\.mkv$/.test(part)) continue;
+      const inPart = marks.filter((mark) => mark.at >= start);
+      if (!inPart.length) continue;
+      const escape = (text) => text.replace(/[=;#\\\n]/g, (c) => (c === "\n" ? " " : `\\${c}`));
+      const meta = `${part}.chapters.txt`;
+      const ends = [...inPart.slice(1).map((mark) => mark.at - start), null];
+      fs.writeFileSync(meta, `;FFMETADATA1\n${inPart.map((mark, i) => `[CHAPTER]\nTIMEBASE=1/1000\nSTART=${mark.at - start}\nEND=${ends[i] ?? mark.at - start + 1000 * 60 * 60 * 24}\ntitle=${escape(title(mark))}\n`).join("")}`);
+      const copy = `${part}.chapters.mkv`;
+      try {
+        await execFile("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", part, "-i", meta, "-map", "0", "-map_metadata", "0", "-map_chapters", "1", "-c", "copy", "-f", "matroska", copy]);
+        const probe = JSON.parse(await execFile("ffprobe", ["-v", "error", "-show_chapters", "-show_entries", "format=duration", "-of", "json", copy]));
+        if (!(Number(probe.format?.duration) > 0) || probe.chapters?.length !== inPart.length) throw new Error("the copy with chapters isn't complete");
+        fs.renameSync(copy, part);
+      } catch (caught) {
+        fs.rmSync(copy, { force: true });
+        warn(`recording: ${part} kept without chapters (${caught.message})`);
+      } finally {
+        fs.rmSync(meta, { force: true });
+      }
+    }
+    log(`recording: ${marks.length} marked moment${marks.length === 1 ? "" : "s"}: ${file}`);
+    return file;
   }
 
   async function transcribeRecording(recording) {
@@ -1626,7 +1864,8 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
 
   async function summarizeRecording(recording) {
     const summaryFile = `${recording.base}.summary.md`;
-    const transcript = fs.readFileSync(await transcribeRecording(recording), "utf8");
+    const captions = `${recording.base}.captions.txt`;
+    const transcript = fs.readFileSync(fs.existsSync(captions) ? captions : await transcribeRecording(recording), "utf8");
     notice("Claude is summarizing the recording…");
     const summary = await ai.ask({
       prompt:
@@ -1644,18 +1883,29 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
    * there, else in the recordings folder) gets the transcript attached (an @ mention; transcribed first if need be) and only the video's path, to
    * be looked at only when the transcript isn't enough.
    */
-  async function shareRecording(recording, sessionId = null) {
-    const transcript = await transcribeRecording(recording);
+  async function shareRecording(recording, sessionId = null, purpose = "share") {
+    // The speaker-named transcript (from the captions) when there is one; Slack's transcription otherwise.
+    const captions = `${recording.base}.captions.txt`;
+    const transcript = fs.existsSync(captions) ? captions : await transcribeRecording(recording);
     const folder = __webpack_require__("powertoys/claude").settings().folders[recording.teamId] ?? path.dirname(recording.base);
     const when = new Date(recording.since).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
     const videos = recording.parts.map((file) => `"${file}"`).join(", ");
+    const marks = `${recording.base}.marks.txt`;
+    const frames = `${recording.base}.frames`;
     const prompt =
-      `A Slack huddle in ${recording.where} was recorded on ${when}. Its transcript is attached: @"${transcript}"\n\n` +
-      `The video is at ${videos} (the huddle window's picture; sound tracks: call and microphone, call, microphone, computer sound). ` +
+      `A Slack huddle in ${recording.where} was recorded on ${when}. Its transcript${transcript === captions ? " (from the live captions, with who spoke)" : ""} is attached: @"${transcript}"\n` +
+      (fs.existsSync(marks) ? `I marked moments during the call; they are attached: @"${marks}"; start from them.\n` : "") +
+      (fs.existsSync(path.join(frames, "index.txt")) ? `Stills of the screen when it changed (shared screens, slides) are in "${frames}" (index.txt lists them by time); look at those before the video.\n` : "") +
+      `\nThe video is at ${videos} (the huddle window's picture; sound tracks: call and microphone, call, microphone, computer sound). ` +
       "Work from the transcript. Only when the transcript isn't enough for something (what was on screen, or speech it got wrong), " +
       "look at the video, and only at the parts you need.\n\n" +
-      "Tell me in a few lines what the call was about, then wait for my questions.";
-    log(`sharing a recording with Claude (${sessionId ? `session ${sessionId}` : "a new Code session"} in ${folder}): ${recording.base}`);
+      (purpose === "tickets"
+        ? "From this call, propose ticket work in Notion's Issues database (Issues & Sprints → Core DBs → Issues), written the way tickets " +
+          "are written there: comments on existing tickets the call is about (ISS-… mentioned, or clearly the same work), and new tickets " +
+          "for new work, each with its fields filled as the others are. List every proposal first and create or change nothing in Notion " +
+          "until I approve it, one by one."
+        : "Tell me in a few lines what the call was about, then wait for my questions.");
+    log(`${purpose === "tickets" ? "proposing tickets from" : "sharing"} a recording with Claude (${sessionId ? `session ${sessionId}` : "a new Code session"} in ${folder}): ${recording.base}`);
     return __webpack_require__("powertoys/assist").toClaude({ prompt, folder, sessionId });
   }
 
@@ -1682,6 +1932,7 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
       return { file, text: fs.readFileSync(file, "utf8") };
     }
     if (op === "share") return shareRecording(recording, sessionId);
+    if (op === "tickets") return shareRecording(recording, sessionId, "tickets");
     throw new Error(`unknown operation ${op}`);
   }
 

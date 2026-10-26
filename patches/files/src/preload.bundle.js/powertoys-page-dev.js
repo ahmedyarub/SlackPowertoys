@@ -28,7 +28,11 @@
     .powertoys-code-bar { display: none; gap: 6px; margin: 2px 0 6px; }
     .powertoys-code-host:hover > .powertoys-code-bar, .powertoys-code-bar:hover { display: flex; }
     .powertoys-explain { position: fixed; z-index: 2147483646; font: 12px Lato, sans-serif; background: #1264a3; color: #fff;
-      border: 0; border-radius: 4px; padding: 3px 9px; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,.3); }`;
+      border: 0; border-radius: 4px; padding: 3px 9px; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,.3); }
+    .powertoys-ticket-card { position: fixed; z-index: 2147483646; max-width: 420px; padding: 4px 10px; border-radius: 6px; pointer-events: none;
+      background: #222529; color: #d1d2d3; font: 12px Lato, sans-serif; box-shadow: 0 0 0 1px rgba(255,255,255,.13), 0 4px 12px rgba(0,0,0,.4);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .powertoys-session-chip { margin: 2px 0; font-size: 12px; opacity: .55; }`;
 
   const FILE_REF = /(?:[A-Za-z]:)?(?:[\w@.-]+[\\/])*[\w@.-]+\.(?:js|jsx|ts|tsx|mjs|cjs|py|go|rs|java|kt|rb|php|cs|cpp|cc|c|h|hpp|swift|scala|ex|exs|vue|svelte|sql|sh|yml|yaml|json)(?::(\d+))(?::(\d+))?/g;
   const NOTION = /^https:\/\/([\w-]+\.)?notion\.(so|site|com)\//;
@@ -71,6 +75,7 @@
   const channelName = () => /^#?([^ ]+) \(Channel\)/.exec(document.title)?.[1] ?? "";
 
   function menuItems() {
+    page.addMessageMenuItem({ label: "Link to a ticket", run: ({ link }) => linkToTicket({ link }) });
     page.addMessageMenuItem({
       label: "Draft a reply with Claude",
       run: async ({ link }) => {
@@ -287,6 +292,121 @@
     }, 800);
   }
 
+  // --- Ticket IDs in messages ------------------------------------------------------------------------------
+  // "ISS-1780" in a message's text (the page's own text, left as it is): pointing at it shows the ticket's title and
+  // status (Notion, read as you); clicking it opens the ticket.
+  let ticketPattern = null;
+  let ticketCard = null;
+  let ticketTimer = null;
+  function ticketAt(x, y) {
+    const range = document.caretRangeFromPoint?.(x, y);
+    const node = range?.startContainer;
+    if (!ticketPattern || node?.nodeType !== Node.TEXT_NODE) return null;
+    const parent = node.parentElement;
+    if (!parent?.closest('[data-qa="message-text"]') || parent.closest("a, code, pre")) return null;
+    for (const match of node.textContent.matchAll(ticketPattern)) {
+      if (range.startOffset >= match.index && range.startOffset <= match.index + match[0].length) {
+        const word = document.createRange();
+        word.setStart(node, match.index);
+        word.setEnd(node, match.index + match[0].length);
+        return { id: match[0], rect: word.getBoundingClientRect(), box: parent.closest('[data-qa="message-text"]') };
+      }
+    }
+    return null;
+  }
+  const dropTicketCard = () => (clearTimeout(ticketTimer), ticketCard?.remove(), (ticketCard = null));
+  let hovered = null;
+  document.addEventListener(
+    "mousemove",
+    (event) => {
+      const found = ticketAt(event.clientX, event.clientY);
+      if (hovered?.box && hovered.box !== found?.box) hovered.box.style.cursor = "";
+      if (found) found.box.style.cursor = "pointer";
+      else if (hovered?.box) hovered.box.style.cursor = "";
+      if (found?.id === hovered?.id) return;
+      hovered = found;
+      dropTicketCard();
+      if (!found) return;
+      ticketTimer = setTimeout(async () => {
+        const info = await page.invoke("ticket-info", { id: found.id }).catch(() => null);
+        if (hovered?.id !== found.id || !info) return;
+        ticketCard = el("div", "powertoys-ticket-card", `${info.id} · ${info.title}${info.status ? ` · ${info.status}` : ""}`);
+        ticketCard.style.left = `${Math.min(found.rect.left, innerWidth - 420)}px`;
+        ticketCard.style.top = `${Math.max(4, found.rect.top - 30)}px`;
+        document.body.appendChild(ticketCard);
+      }, 350);
+    },
+    { passive: true },
+  );
+  document.addEventListener(
+    "click",
+    async (event) => {
+      const found = event.button === 0 && !getSelection()?.toString() && ticketAt(event.clientX, event.clientY);
+      if (!found) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const info = await page.invoke("ticket-info", { id: found.id }).catch((caught) => (page.notice(`Couldn't find ${found.id}: ${page.reason(caught)}`), null));
+      if (info?.url) window.open(info.url);
+      else if (info === null) page.notice(`${found.id}: no such ticket, or Notion isn't signed in as you (Powertoys panel, Settings).`);
+    },
+    true,
+  );
+
+  // --- A thread linked to a ticket -------------------------------------------------------------------------
+  // "Link to a ticket" (message menu): the ticket the thread mentions, or the one of yours Claude picks; you choose it
+  // and can edit the comment (the thread's link and a line on it); it is added to the ticket only when you press Add.
+  async function linkToTicket({ link }) {
+    const shown = page.popover({ title: "Link to a ticket", text: "Finding the ticket…" });
+    let found;
+    try {
+      found = await page.invoke("thread-tickets", { link });
+    } catch (caught) {
+      return shown.setText(`Couldn't read the thread: ${page.reason(caught)}`);
+    }
+    if (!found.tickets.length) return shown.setText("No ticket of yours is clearly about this thread (and it mentions none).");
+    const body = el("div");
+    const select = el("select");
+    for (const ticket of found.tickets) select.append(Object.assign(el("option", "", `${ticket.id} · ${ticket.title} (${ticket.status})`), { value: ticket.url }));
+    const comment = Object.assign(el("textarea"), { value: found.comment, rows: 4 });
+    comment.setAttribute("aria-label", "The comment to add");
+    const add = el("button", "", "Add comment to the ticket");
+    add.addEventListener("click", async () => {
+      add.disabled = true;
+      try {
+        await page.invoke("link-ticket", { url: select.value, comment: comment.value });
+        shown.setText("Added to the ticket.");
+      } catch (caught) {
+        add.disabled = false;
+        page.notice(`Couldn't add it: ${page.reason(caught)}`);
+      }
+    });
+    for (const node of [select, comment]) Object.assign(node.style, { width: "100%", boxSizing: "border-box", margin: "4px 0", font: "inherit" });
+    body.append(select, comment, add);
+    shown.setContent(body);
+  }
+
+  // --- Threads' Claude Code sessions -----------------------------------------------------------------------
+  // A thread that started a session shows a faint chip under it: the session's title, and whether it is working.
+  let threadSessions = {};
+  const messageKey = (link) => /\/archives\/([A-Z0-9]+)\/p(\d+)/.exec(String(link))?.slice(1).join(":") ?? null;
+  async function showSessionChips() {
+    threadSessions = await page.invoke("thread-sessions").catch(() => threadSessions);
+    for (const item of document.querySelectorAll('[data-qa="virtual-list-item"]')) {
+      const link = [...item.querySelectorAll('a[href*="/archives/"]')].find((a) => a.pathname.includes("/p"))?.href;
+      const session = threadSessions[messageKey(link)];
+      let chip = item.querySelector(".powertoys-session-chip");
+      if (!session) {
+        chip?.remove();
+        continue;
+      }
+      if (!chip) {
+        chip = el("div", "powertoys-session-chip");
+        item.querySelector('[data-qa="message-text"]')?.after(chip);
+      }
+      chip.textContent = `✦ Claude Code · ${session.title} · ${session.working ? "working" : "idle"}`;
+    }
+  }
+
   // --- Explain a selection ---------------------------------------------------------------------------------
   let explainButton = null;
   function offerExplain() {
@@ -317,7 +437,14 @@
     style.textContent = STYLE;
     document.head.appendChild(style);
     menuItems();
-    page.invoke("settings").then((s) => s.incidentPattern && (incidentPattern = new RegExp(s.incidentPattern, "i"))).catch(() => {});
+    page.invoke("settings")
+      .then((s) => {
+        if (s.incidentPattern) incidentPattern = new RegExp(s.incidentPattern, "i");
+        if (s.ticketPrefix) ticketPattern = new RegExp(`\\b${s.ticketPrefix.replace(/\W/g, "")}-\\d+\\b`, "g");
+      })
+      .catch(() => {});
+    setInterval(() => showSessionChips().catch(() => {}), 30000);
+    setTimeout(() => showSessionChips().catch(() => {}), 5000);
     page.on("powertoys:run-status", (info) => {
       for (const [url, list] of cards) if (url.startsWith(info.url)) for (const card of list) githubBody(card, info);
     });

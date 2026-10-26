@@ -113,6 +113,7 @@
       "Tell me in a few lines what it is about, then wait for my questions.";
     const where = folderOf(teamId) ?? folder;
     log(`sharing ${clips.length} clip${clips.length === 1 ? "" : "s"} with Claude (${sessionId ? `session ${sessionId}` : "a new Code session"} in ${where})`);
+    if (!sessionId) __webpack_require__("powertoys/tickets").rememberThreadSession({ link, folder: where, kind: "video" });
     return toClaude({ prompt, folder: where, sessionId });
   }
 
@@ -416,6 +417,7 @@
         "When it is done (a branch or pull request), put a reply in that thread as a draft with create_slack_draft, with the link and two lines on what changed.",
       folder,
     );
+    __webpack_require__("powertoys/tickets").rememberThreadSession({ link, folder, kind: "task" });
     return { folder };
   }
 
@@ -437,6 +439,7 @@
       folder,
     );
     log(`issue from a thread: Claude Code in ${folder}`);
+    __webpack_require__("powertoys/tickets").rememberThreadSession({ link, folder, kind: "issue" });
     return { folder };
   }
 
@@ -604,6 +607,7 @@
     settings: () => ({
       notion: notion.configured(),
       notionAsYou: notion.mcpSignedIn(),
+      ticketPrefix: notion.canReadTickets() ? notion.ticketPrefix() : null,
       notionClientId: notion.settings().clientId || null,
       notionRedirectUri: notion.redirectUri,
       transcriptLanguage: claude.transcriptLanguage(),

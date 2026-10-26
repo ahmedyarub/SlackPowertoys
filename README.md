@@ -135,6 +135,20 @@ patches/files/...           files that are entirely new (written for Powertoys),
   saved to `%APPDATA%\Slack\powertoys\history\messages.jsonl` before the message is marked, and listed in the panel's
   History tab. Only what your Slack sees while it runs is kept.
 - **Louder videos:** pointing at a video shows a "Louder" slider, 100% to 300%, on top of Slack's own volume.
+- **More from each recording:** a transcript with who spoke (from Slack's live captions, also as a subtitle track);
+  **★ Mark** (or Ctrl+Shift+M) in the huddle window to mark a moment, which becomes a chapter; stills of the screen
+  whenever it changes a lot (a new slide, another shared screen). Share with Claude hands all three over before the
+  video. **Propose tickets** asks the session you pick for comments and new tickets in your Notion Issues database,
+  creating nothing until you approve each one.
+- **Brief:** a faint "Brief" chip in the huddle window. In the daily standup it summarizes what of yours was released
+  since the previous working day (your team's release-bot posts) and your tickets in flight, for "What are you working
+  on? Blocked? Done by?" (`"standup": {"channel", "time", "releaseChannel", "githubUser"}`). In other calls: what's
+  open with that person or channel lately, the tickets mentioned and their status, and the last recorded call.
+- **Tickets next to messages** (Notion read as you; `"notion": {"issues", "people", "ticketPrefix"}`): pointing at a
+  ticket ID like "ISS-1780" in a message shows its title and status, and clicking it opens it; **Link to a ticket**
+  in the message menu adds the thread's link to the ticket it's about, after you confirm the comment; a thread that
+  started a Claude Code session shows that session's title and whether it's working; the Digest tab lists your
+  tickets' status changes since yesterday and the ones in flight, with a **Standup summary** button.
 - **Auto-start for a copy run from its own folder:** with no Squirrel launcher (`slack.exe`) one folder up, "Launch
   on login" registers the running executable itself.
 - **Mods:** CSS and JavaScript files in `%APPDATA%\Slack\powertoys\mods\` are inserted into, and run in, Slack's

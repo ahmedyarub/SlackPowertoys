@@ -167,6 +167,46 @@
   }
 
   function renderDigest(body) {
+    // Your tickets (Notion, as you): status changes since the last day seen, and the ones in flight; the standup summary.
+    const tickets = el("div");
+    const standup = el("button", "act", "Standup summary");
+    standup.style.marginRight = "6px";
+    standup.addEventListener("click", async () => {
+      standup.disabled = true;
+      const shown = page.popover({ title: "Standup", text: "Reading the releases and your tickets…" });
+      try {
+        shown.setMarkdown(await page.invoke("standup", { teamId: page.currentTeamId() }));
+      } catch (caught) {
+        shown.setText(`Couldn't make it: ${page.reason(caught)}`);
+      } finally {
+        standup.disabled = false;
+      }
+    });
+    page
+      .invoke("ticket-changes")
+      .then((found) => {
+        if (found.setup) return tickets.append(el("div", "sub", "Your Notion tickets show here once Notion is signed in as you (Settings)."));
+        tickets.append(el("div", "group", found.since ? `Your tickets since ${found.since}` : "Your tickets"));
+        if (found.since && !found.changes.length) tickets.append(el("div", "sub", "No status changes."));
+        if (!found.since) tickets.append(el("div", "sub", "Changes show from tomorrow (today is the first day seen)."));
+        for (const change of found.changes) {
+          const row = el("div", "row");
+          const open = el("span", "link", `${change.id} ${change.title}`);
+          open.addEventListener("click", () => openLink(change.url));
+          row.append(open, el("div", "sub", `${change.from} → ${change.status}`));
+          tickets.append(row);
+        }
+        tickets.append(el("div", "group", `In flight (${found.inFlight.length})`));
+        for (const ticket of found.inFlight) {
+          const row = el("div", "row");
+          const open = el("span", "link", `${ticket.id} ${ticket.title}`);
+          open.addEventListener("click", () => openLink(ticket.url));
+          row.append(open, el("div", "sub", ticket.status));
+          tickets.append(row);
+        }
+      })
+      .catch((caught) => tickets.append(el("div", "sub", `Couldn't read your tickets: ${page.reason(caught)}`)));
+    body.append(standup);
     const go = el("button", "act", "Summarize what is unread");
     const out = el("div");
     go.addEventListener("click", async () => {
@@ -180,7 +220,7 @@
         go.disabled = false;
       }
     });
-    body.append(go, out);
+    body.append(go, out, tickets);
   }
 
   /** The recorded huddles, newest first, each with what can be done with it. */

@@ -160,6 +160,14 @@
           return invoke("recording", { base, op: "share", sessionId }).then(shared, (caught) => notice(`Couldn't share it with Claude: ${reason(caught)}`));
         },
       },
+      {
+        label: "Propose tickets",
+        run: async () => {
+          const sessionId = await chooseSession({ base });
+          if (sessionId === undefined) return;
+          return invoke("recording", { base, op: "tickets", sessionId }).then(shared, (caught) => notice(`Couldn't ask Claude for tickets: ${reason(caught)}`));
+        },
+      },
       { label: "Save", run: () => invoke("recording", { base, op: "save" }).then(() => notice("Recording saved.")) },
       { label: "Delete", run: () => invoke("recording", { base, op: "delete" }).then(() => notice("Recording moved to the Recycle Bin.")) },
     ];
@@ -193,19 +201,20 @@
     const transcribe = check("Transcribe", false);
     const summarize = check("Summarize", false);
     const share = check("Share with Claude", false);
-    // Summarize and Share need the transcript, and all of them need the recording kept.
-    for (const needsTranscript of [summarize, share]) {
+    const tickets = check("Propose tickets", false);
+    // Summarize, Share and Tickets need the transcript, and all of them need the recording kept.
+    for (const needsTranscript of [summarize, share, tickets]) {
       needsTranscript.input.addEventListener("change", () => needsTranscript.input.checked && ((transcribe.input.checked = true), (keep.input.checked = true)));
     }
-    transcribe.input.addEventListener("change", () => (transcribe.input.checked ? (keep.input.checked = true) : (summarize.input.checked = share.input.checked = false)));
-    keep.input.addEventListener("change", () => keep.input.checked || (transcribe.input.checked = summarize.input.checked = share.input.checked = false));
+    transcribe.input.addEventListener("change", () => (transcribe.input.checked ? (keep.input.checked = true) : (summarize.input.checked = share.input.checked = tickets.input.checked = false)));
+    keep.input.addEventListener("change", () => keep.input.checked || (transcribe.input.checked = summarize.input.checked = share.input.checked = tickets.input.checked = false));
     const close = button("×", () => node.remove(), "close");
     close.title = "Close (the recording is kept)";
     // What the end-of-call check found (the call's sound recorded or not); a problem is announced.
     const verdictNode = verdict ? Object.assign(document.createElement("span"), { textContent: verdict, className: verdict.includes("⚠") ? "verdict warn" : "verdict" }) : "";
     if (verdict?.includes("⚠")) verdictNode.setAttribute("role", "alert");
     const choices = () => {
-      node.replaceChildren(title, verdictNode, keep.wrap, transcribe.wrap, summarize.wrap, share.wrap, button("OK", apply), close);
+      node.replaceChildren(title, verdictNode, keep.wrap, transcribe.wrap, summarize.wrap, share.wrap, tickets.wrap, button("OK", apply), close);
       keep.input.focus();
     };
     const apply = () => {
@@ -230,6 +239,7 @@
           else if (transcribe.input.checked) await run("Transcribe");
           else notice("Recording kept.");
           if (share.input.checked) await run("Share with Claude");
+          if (tickets.input.checked) await run("Propose tickets");
         })
         .catch((caught) => notice(`Couldn't keep it: ${reason(caught)}`));
     };
@@ -444,7 +454,7 @@
       box.style.top = `${Math.max(8, Math.min(y, innerHeight - rect.height - 8))}px`;
       box.style.transform = "none";
     }
-    return { box, body, setText: (value) => (body.textContent = value), setMarkdown: (value) => body.replaceChildren(renderMarkdown(value)) };
+    return { box, body, setText: (value) => (body.textContent = value), setMarkdown: (value) => body.replaceChildren(renderMarkdown(value)), setContent: (node) => body.replaceChildren(node) };
   }
 
   const POPOVER_STYLE = `

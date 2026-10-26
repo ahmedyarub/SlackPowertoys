@@ -409,6 +409,71 @@
     };
   }
 
+  // --- Tickets, as you (link titles, briefs, the standup, the digest, thread → ticket) --------------------------
+  // Settings: notion.issues (the Issues data source, "collection://…"), notion.people (the one its Owner column points
+  // to), notion.ticketPrefix (the IDs' prefix, "ISS"), notion.activeStatuses (what "working on" means). Read with SQL
+  // through Notion's MCP server, signed in as you.
+  const ACTIVE = ["In progress", "Blocked", "Code Review Pending", "Deployed (Dev)", "Deployed(UAT)", "Acceptance Testing"];
+  const ticketSettings = () => ({ ticketPrefix: "ISS", activeStatuses: ACTIVE, ...settings() });
+  exports.ticketPrefix = () => ticketSettings().ticketPrefix;
+  exports.activeStatuses = () => ticketSettings().activeStatuses;
+  function needTickets() {
+    const current = ticketSettings();
+    if (!mcpSignedIn()) throw new Error("Notion: sign in as you first (Powertoys panel, Settings)");
+    if (!current.issues) throw new Error("Notion: notion.issues (the Issues data source) isn't set");
+    return current;
+  }
+  exports.canReadTickets = () => mcpSignedIn() && Boolean(ticketSettings().issues);
+
+  async function sql(source, query, params = []) {
+    const result = await mcpTool("notion-query-data-sources", { data: { data_source_urls: [source], query, params } });
+    if (!Array.isArray(result.results)) throw new Error(`Notion (as you): ${String(result.text ?? JSON.stringify(result)).slice(0, 200)}`);
+    return result.results;
+  }
+  const ticketOf = (row, prefix) => ({ id: `${prefix}-${row["userDefined:ID"]}`, title: row.Name, status: row.Status ?? null, url: row.url });
+
+  /** A ticket by its ID ("ISS-1780") -> { id, title, status, url }, or null. */
+  function ticket(ref) {
+    const current = needTickets();
+    const number = Number(/(\d+)\s*$/.exec(String(ref))?.[1]);
+    if (!number) return Promise.resolve(null);
+    return cached(`ticket:${number}`, 10 * 60e3, async () => {
+      const rows = await sql(current.issues, `SELECT url, Name, Status, "userDefined:ID" FROM "${current.issues}" WHERE "userDefined:ID" = ?`, [number]);
+      return rows[0] ? ticketOf(rows[0], current.ticketPrefix) : null;
+    });
+  }
+  exports.ticket = ticket;
+
+  /** Your page among the people the Owner column points to (by your Notion name) -> its id, no dashes. */
+  function myOwnerId() {
+    const current = needTickets();
+    if (!current.people) return Promise.reject(new Error("Notion: notion.people (the Owner column's data source) isn't set"));
+    return cached("owner:me", 60 * 60e3, async () => {
+      const me = await mcpTool("notion-get-self", {});
+      const name = me.user?.name;
+      const rows = name ? await sql(current.people, `SELECT url FROM "${current.people}" WHERE Name = ?`, [name]) : [];
+      const id = /([0-9a-f]{32})/.exec(String(rows[0]?.url ?? "").replace(/-/g, ""))?.[1];
+      if (!id) throw new Error(`Notion: no one named "${name ?? "?"}" among the tickets' owners`);
+      return id;
+    });
+  }
+
+  /** Your tickets (you among their owners) in some statuses (default: the active ones) -> [{ id, title, status, url }]. */
+  async function myTickets(statuses = ticketSettings().activeStatuses) {
+    const current = needTickets();
+    const owner = await myOwnerId();
+    const rows = await sql(
+      current.issues,
+      `SELECT url, Name, Status, "userDefined:ID" FROM "${current.issues}" WHERE Owner LIKE ? AND Status IN (${statuses.map(() => "?").join(", ")}) ORDER BY "userDefined:ID" DESC LIMIT 60`,
+      [`%${owner}%`, ...statuses],
+    );
+    return rows.map((row) => ticketOf(row, current.ticketPrefix));
+  }
+  exports.myTickets = myTickets;
+
+  /** A comment on a ticket's page, as you. */
+  exports.comment = (pageUrl, markdown) => mcpTool("notion-create-comment", { page_id: pageUrl, markdown });
+
   /** Pages and databases whose title matches -> [{ title, url, icon, editedAt }]. */
   async function search(query, limit = 10) {
     const { results = [] } = await call("POST", "/search", { query, page_size: limit });
