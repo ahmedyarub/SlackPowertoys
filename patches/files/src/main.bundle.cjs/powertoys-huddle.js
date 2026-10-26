@@ -883,7 +883,8 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
       // For lining the call's sound up with the parts, also after a crash.
       starts: recording.starts ?? saved.starts ?? {},
       sounds: recording.sounds ?? saved.sounds ?? {},
-      calls: recording.calls ?? saved.calls ?? [],
+      // (only what the file needs: a live call also holds its file handle, timer and callbacks)
+      calls: (recording.calls ?? saved.calls ?? []).map(({ file, startedAt }) => ({ file, startedAt })),
       callStats: recording.callStats ?? saved.callStats ?? null,
       check: recording.check ?? saved.check ?? null,
     };
@@ -1159,7 +1160,7 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
       recording.noTrack = message.tracks ? 0 : (recording.noTrack ?? 0) + 1;
       if (recording.noTrack === 15) alarm(recording, "no sound from the huddle has reached the recording for 15 seconds");
       else if (message.tracks && recording.alarm?.startsWith("no sound")) alarm(recording, null);
-      if (stats.seconds % 30 === 0) writeStatus(recording, recording.status);
+      if (stats.seconds % 30 === 0) writeStatus(recording, recording.status ?? "recording");
     }
   }
 
@@ -1178,7 +1179,7 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
       });
       call.startedAt = started.startedAt;
       call.lastPiece = Date.now();
-      writeStatus(recording, recording.status);
+      writeStatus(recording, recording.status ?? "recording");
       log(`recording the huddle's sound from Slack's page to ${call.file} (${started.tracks} track${started.tracks === 1 ? "" : "s"} so far)`);
       // Pieces stopping is the tap failing (the page reloaded, the recorder died): alarm, and a new tap.
       call.watchdog = setInterval(() => {
@@ -1637,6 +1638,27 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     return summaryFile;
   }
 
+  /**
+   * Shares a recording with Claude: a new Claude Code session (in the workspace's linked folder, else the recordings
+   * folder) gets the transcript attached (an @ mention; transcribed first if need be) and only the video's path, to
+   * be looked at only when the transcript isn't enough.
+   */
+  async function shareRecording(recording) {
+    const transcript = await transcribeRecording(recording);
+    const folder = __webpack_require__("powertoys/claude").settings().folders[recording.teamId] ?? path.dirname(recording.base);
+    const when = new Date(recording.since).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
+    const videos = recording.parts.map((file) => `"${file}"`).join(", ");
+    const prompt =
+      `A Slack huddle in ${recording.where} was recorded on ${when}. Its transcript is attached: @"${transcript}"\n\n` +
+      `The video is at ${videos} (the huddle window's picture; sound tracks: call and microphone, call, microphone, computer sound). ` +
+      "Work from the transcript. Only when the transcript isn't enough for something (what was on screen, or speech it got wrong), " +
+      "look at the video, and only at the parts you need.\n\n" +
+      "Tell me in a few lines what the call was about, then wait for my questions.";
+    await electron.shell.openExternal(`claude://code/new?folder=${encodeURIComponent(folder)}&q=${encodeURIComponent(prompt)}`);
+    log(`recording shared with Claude (a Code session in ${folder}): ${recording.base}`);
+    return { folder };
+  }
+
   /** An operation on a recording -> what the page shows. */
   async function recordingOperation({ base, op }) {
     const recording = recordingAt(base);
@@ -1659,6 +1681,7 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
       const file = await summarizeRecording(recording);
       return { file, text: fs.readFileSync(file, "utf8") };
     }
+    if (op === "share") return shareRecording(recording);
     throw new Error(`unknown operation ${op}`);
   }
 

@@ -116,14 +116,22 @@
             (caught) => notice(`Couldn't summarize: ${reason(caught)}`),
           ),
       },
+      {
+        label: "Share with Claude",
+        run: () =>
+          invoke("recording", { base, op: "share" }).then(
+            ({ folder }) => notice(`Opening Claude Code in ${folder} with the transcript…`),
+            (caught) => notice(`Couldn't share it with Claude: ${reason(caught)}`),
+          ),
+      },
       { label: "Save", run: () => invoke("recording", { base, op: "save" }).then(() => notice("Recording saved.")) },
       { label: "Delete", run: () => invoke("recording", { base, op: "delete" }).then(() => notice("Recording moved to the Recycle Bin.")) },
     ];
   }
 
   /**
-   * When a huddle's recording ends: check-boxes for what to do with it (Keep, checked; Transcribe; Summarize, which
-   * transcribes first) and OK. Unticking Keep and pressing OK asks before the recording goes to the Recycle Bin;
+   * When a huddle's recording ends: check-boxes for what to do with it (Keep, checked; Transcribe; Summarize and Share
+   * with Claude, which transcribe first) and OK. Unticking Keep and pressing OK asks before the recording goes to the Recycle Bin;
    * closing the prompt or leaving it keeps the recording.
    */
   function recordingPrompt({ base, parts, where, minutes, recovered, check: verdict }) {
@@ -148,17 +156,20 @@
     const keep = check("Keep the recording", true);
     const transcribe = check("Transcribe", false);
     const summarize = check("Summarize", false);
-    // Summarize needs the transcript, and both need the recording kept.
-    summarize.input.addEventListener("change", () => summarize.input.checked && ((transcribe.input.checked = true), (keep.input.checked = true)));
-    transcribe.input.addEventListener("change", () => (transcribe.input.checked ? (keep.input.checked = true) : (summarize.input.checked = false)));
-    keep.input.addEventListener("change", () => keep.input.checked || ((transcribe.input.checked = false), (summarize.input.checked = false)));
+    const share = check("Share with Claude", false);
+    // Summarize and Share need the transcript, and all of them need the recording kept.
+    for (const needsTranscript of [summarize, share]) {
+      needsTranscript.input.addEventListener("change", () => needsTranscript.input.checked && ((transcribe.input.checked = true), (keep.input.checked = true)));
+    }
+    transcribe.input.addEventListener("change", () => (transcribe.input.checked ? (keep.input.checked = true) : (summarize.input.checked = share.input.checked = false)));
+    keep.input.addEventListener("change", () => keep.input.checked || (transcribe.input.checked = summarize.input.checked = share.input.checked = false));
     const close = button("×", () => node.remove(), "close");
     close.title = "Close (the recording is kept)";
     // What the end-of-call check found (the call's sound recorded or not); a problem is announced.
     const verdictNode = verdict ? Object.assign(document.createElement("span"), { textContent: verdict, className: verdict.includes("⚠") ? "verdict warn" : "verdict" }) : "";
     if (verdict?.includes("⚠")) verdictNode.setAttribute("role", "alert");
     const choices = () => {
-      node.replaceChildren(title, verdictNode, keep.wrap, transcribe.wrap, summarize.wrap, button("OK", apply), close);
+      node.replaceChildren(title, verdictNode, keep.wrap, transcribe.wrap, summarize.wrap, share.wrap, button("OK", apply), close);
       keep.input.focus();
     };
     const apply = () => {
@@ -176,8 +187,14 @@
       node.remove();
       const actions = recordingActions(base);
       const run = (label) => actions.find((action) => action.label === label).run();
+      // One after the other: sharing needs the transcript that Transcribe or Summarize makes first.
       invoke("recording", { base, op: "save" })
-        .then(() => (summarize.input.checked ? run("Summarize") : transcribe.input.checked ? run("Transcribe") : notice("Recording kept.")))
+        .then(async () => {
+          if (summarize.input.checked) await run("Summarize");
+          else if (transcribe.input.checked) await run("Transcribe");
+          else notice("Recording kept.");
+          if (share.input.checked) await run("Share with Claude");
+        })
         .catch((caught) => notice(`Couldn't keep it: ${reason(caught)}`));
     };
     choices();

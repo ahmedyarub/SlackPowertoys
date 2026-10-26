@@ -88,7 +88,9 @@ patches/files/...           files that are entirely new (written for Powertoys),
   says so, and it restarts. The file has the tracks "Call and microphone" (the default), "Call", "Microphone" and
   "Computer sound (backup)". When the huddle ends, Slack says whether the call's sound was recorded, and offers **Transcribe** (Slack's own transcription, via a private upload,
   saved beside the video and added to it as a subtitle track),
-  **Summarize** (Claude) and **Keep** as checkboxes, or delete it (Recycle Bin, after a Yes/No); also in the panel's
+  **Summarize** (Claude), **Share with Claude** (a new Claude Code session gets the transcript attached and only the
+  video's path, and looks at the video only when the transcript isn't enough) and **Keep** as checkboxes, or delete
+  it (Recycle Bin, after a Yes/No); also in the panel's
   Recordings tab.
   `"huddle": {"autoRecord": false}` turns it off. You are responsible for telling the people on the call.
 - **Transcription language:** a dropdown in the panel's Settings tab (English by default) for every transcript.
