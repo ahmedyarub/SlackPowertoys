@@ -599,9 +599,25 @@ function Await($op, [Type]$t) { $task = $asTask.MakeGenericMethod($t).Invoke($nu
 $radio = (Await ([Windows.Devices.Radios.Radio]::GetRadiosAsync()) ([System.Collections.Generic.IReadOnlyList[Windows.Devices.Radios.Radio]])) | Where-Object { $_.Kind -eq 'Bluetooth' }
 if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([Windows.Devices.Radios.RadioAccessStatus]) | Out-Null; 'off' } else { 'was-off' }
 `;
+  // Where a huddle is ringing or about to start right now (a window's id, or "main" for Slack's main window), and the
+  // one pending "off" (a new ring, start screen or huddle cancels it): Bluetooth never goes off while either is open.
+  const ringingIn = new Set();
+  let offTimer = null;
+  function bluetoothOffLater(why, ms) {
+    clearTimeout(offTimer);
+    offTimer = setTimeout(() => {
+      offTimer = null;
+      bluetoothOff(why).catch((caught) => warn(`bluetooth: ${caught.message}`));
+    }, ms);
+  }
+  function keepBluetooth() {
+    clearTimeout(offTimer);
+    offTimer = null;
+  }
+
   async function bluetoothOff(why) {
     if (connecting) return void (offWanted = why);
-    if (!bluetoothOurs || huddles.size) return;
+    if (!bluetoothOurs || huddles.size || ringingIn.size) return;
     setBluetoothOurs(false);
     const script = path.join(os.tmpdir(), "powertoys-bluetooth-off.ps1");
     fs.writeFileSync(script, BLUETOOTH_OFF_SCRIPT);
@@ -613,19 +629,24 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     log(`huddle ${why}: Bluetooth ${output}`);
   }
 
-  /** An incoming huddle rings (in its invite window or in Slack's main window). */
-  function ringStarted() {
+  /** A huddle rings or is about to start (in a window Slack opened, or in its main window: "main"). */
+  function ringStarted(where) {
     log("huddle ringing");
+    ringingIn.add(where);
+    keepBluetooth();
     headphonesOn("ringing").catch((caught) => warn(`headphones: ${caught.message}`));
   }
   /** Cancel (before starting or joining) or Decline (an incoming huddle): Bluetooth off now. */
-  function ringCancelled() {
+  function ringCancelled(where) {
     log("huddle cancelled");
+    ringingIn.delete(where);
+    keepBluetooth();
     bluetoothOff("cancelled").catch((caught) => warn(`bluetooth: ${caught.message}`));
   }
-  /** The ringing stopped some other way: if no huddle started (missed), Bluetooth off again. */
-  function ringEnded() {
-    setTimeout(() => bluetoothOff("ring ended").catch((caught) => warn(`bluetooth: ${caught.message}`)), 15000);
+  /** The ringing stopped some other way (answered, missed): off 15 s later, unless a huddle or another ring is on. */
+  function ringEnded(where) {
+    if (!ringingIn.delete(where)) return;
+    bluetoothOffLater("ring ended", 15000);
   }
 
   async function headphonesOn(why) {
@@ -713,17 +734,20 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
       } catch {
         return;
       }
-      if (message.type === "ringing") return ringStarted();
-      if (message.type === "ring-ended") return ringEnded();
-      if (message.type === "cancelled") return ringCancelled();
+      if (message.type === "ringing") return ringStarted(contents.id);
+      if (message.type === "ring-ended") return ringEnded(contents.id);
+      if (message.type === "cancelled") return ringCancelled(contents.id);
       if (message.type === "huddle") return addClaude(contents).catch((caught) => warn(`huddle: ${caught.message}`));
       onMessage(contents, message).catch((caught) => warn(`huddle: ${caught.message}`));
     });
     contents.once("destroyed", () => {
       const wasHuddle = huddles.delete(contents.id);
+      const wasRinging = ringingIn.delete(contents.id);
       stopRecording(contents, true).catch((caught) => warn(`recording: ${caught.message}`));
-      // The huddle ended (or the ringing window closed): Bluetooth off again if Powertoys turned it on.
-      setTimeout(() => bluetoothOff(wasHuddle ? "ended" : "window closed").catch((caught) => warn(`bluetooth: ${caught.message}`)), wasHuddle ? 3000 : 15000);
+      // The huddle ended (or its ringing / start screen closed): Bluetooth off again if Powertoys turned it on. Any
+      // other window (Powertoys' recorder, ...) has nothing to do with it.
+      if (wasHuddle) bluetoothOffLater("ended", 3000);
+      else if (wasRinging) bluetoothOffLater("ring window closed", 15000);
     });
     // The window is about:blank until Slack's page draws in it; the watcher goes in as soon as it can run.
     // (A window Slack's page opens says it is at the page's address from inside, so its main window is told apart
@@ -737,6 +761,7 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
 
   async function addClaude(contents) {
     huddles.set(contents.id, { folder: currentFolder(), session: null, sessions: [], created: new Set() });
+    keepBluetooth();
     // The huddle window opens maximized.
     const huddleWindow = electron.BrowserWindow.fromWebContents(contents);
     if (huddleWindow && !huddleWindow.isMaximized()) huddleWindow.maximize();
@@ -1246,9 +1271,9 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
       if (contents.getType() === "window") watchWindow(contents);
     });
     electron.ipcMain.handle("powertoys:recording", (event, request) => recordingOperation(request));
-    electron.ipcMain.handle("powertoys:huddle-ringing", () => ringStarted());
-    electron.ipcMain.handle("powertoys:huddle-ring-ended", () => ringEnded());
-    electron.ipcMain.handle("powertoys:huddle-cancelled", () => ringCancelled());
+    electron.ipcMain.handle("powertoys:huddle-ringing", () => ringStarted("main"));
+    electron.ipcMain.handle("powertoys:huddle-ring-ended", () => ringEnded("main"));
+    electron.ipcMain.handle("powertoys:huddle-cancelled", () => ringCancelled("main"));
     electron.ipcMain.handle("powertoys:recordings", () => listRecordings());
     electron.ipcMain.handle("powertoys:recording-open", (event, request) => openRecordingFile(request));
     electron.app.on("before-quit", finishBeforeQuit);
