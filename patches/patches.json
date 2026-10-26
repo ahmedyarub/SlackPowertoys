@@ -206,7 +206,7 @@
   {
    "path": "src/main.bundle.cjs/powertoys-main.js",
    "kind": "add",
-   "sha256": "a760e699fea8cebca78699f0545c641e6a47219ccac8d9ecc6199c7970251342"
+   "sha256": "16b62869f4ed8a37062e834cfc21faf69b1d954e003c22f9500de4afd8ecfd54"
   },
   {
    "path": "src/main.bundle.cjs/powertoys-notion.js",

@@ -169,8 +169,61 @@
     __webpack_require__("powertoys/assist").addTrayItems(menu);
   };
 
+  // --- Why Slack quit -----------------------------------------------------------------------------------------
+  // When Slack starts quitting, one log line says what led to it: the code path that sent Slack's QUIT_APP (its
+  // stack), the last keys pressed with Ctrl, Alt or Windows held (AltGr shows as Ctrl+Alt; plain typing is never
+  // recorded) and the last outside events (Windows ending the session, a second instance, windows closing).
+  const recent = [];
+  const remember = (what) => {
+    recent.push(`${new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(11, 23)} ${what}`);
+    if (recent.length > 30) recent.shift();
+  };
+  function watchQuit(store) {
+    let reported = false;
+    const report = (how, stack) => {
+      if (reported) return;
+      reported = true;
+      log(`quitting (${how}); recent: ${recent.join(" · ") || "nothing"}${stack ? `; sent from: ${stack}` : ""}`);
+    };
+    const stackOf = () =>
+      (new Error().stack ?? "")
+        .split("\n")
+        .slice(3, 18)
+        .map((line) => line.trim().replace(/^at /, ""))
+        .join(" < ");
+    // Who calls Slack's store with QUIT_APP (a caller holding the store's own dispatch is seen when the state flips).
+    if (store) {
+      const dispatch = store.dispatch;
+      store.dispatch = (action) => {
+        if (action?.type === "QUIT_APP" || action?.type === "QUIT_APPLICATION") report(`store ${action.type}`, stackOf());
+        return dispatch(action);
+      };
+      // (A subscriber runs inside the dispatch that changed the state, so its stack shows who sent it.)
+      store.subscribe(() => store.getState()?.app?.isQuitting && report("Slack's state says it is quitting", stackOf()));
+    }
+    const watchKeys = (contents) =>
+      contents.on("before-input-event", (event, input) => {
+        if (input.type !== "keyDown" || input.isAutoRepeat || !(input.control || input.alt || input.meta)) return;
+        const keys = [input.control && "Ctrl", input.alt && "Alt", input.shift && "Shift", input.meta && "Win", input.code].filter(Boolean).join("+");
+        remember(`keys ${keys} (${contents.getType()} ${contents.id})`);
+      });
+    for (const contents of electron.webContents.getAllWebContents()) watchKeys(contents);
+    electron.app.on("web-contents-created", (event, contents) => watchKeys(contents));
+    electron.app.on("browser-window-created", (event, window) => window.on("close", () => remember(`window closing: ${window.getTitle()}`)));
+    for (const window of electron.BrowserWindow.getAllWindows()) window.on("close", () => remember(`window closing: ${window.getTitle()}`));
+    electron.app.on("second-instance", (event, argv) => remember(`second instance: ${argv.slice(1).join(" ").slice(0, 200)}`));
+    // (Before Slack's own before-quit listener, which sends QUIT_APP at once.)
+    electron.app.prependListener("before-quit", () => remember("before-quit"));
+    electron.app.on("will-quit", () => report("will-quit"));
+    electron.powerMonitor.on("shutdown", () => remember("Windows shutting down"));
+    electron.app.on("session-end", () => remember("Windows ending the session"));
+    electron.app.on("query-session-end", (event) => remember(`Windows asking to end the session (${event.reasons?.join(", ") ?? ""})`));
+    process.on("exit", (code) => report(`process exit ${code}`));
+  }
+
   exports.start = function start(store) {
     fs.mkdirSync(path.join(powertoysDir(), "mods"), { recursive: true });
+    watchQuit(store);
     // The page half's messages go to Slack's log.
     electron.ipcMain.on("powertoys:log", (event, message) => log(`[page] ${String(message).slice(0, 4000)}`));
     electron.ipcMain.handle("powertoys:mark-all-read", (event, teamId) => markAllRead(teamId ?? null));
