@@ -1,7 +1,8 @@
 // ---------------------------------------------------------------------------------------------
 // Powertoys (local addition): huddles and Claude. Slack draws a huddle's window itself (an about:blank window its page
 // opened), so Powertoys adds a script to it once the huddle shows there:
-//   - the window opens maximized, and its side panel shows Captions rather than the huddle's Thread;
+//   - the window opens maximized, and its side panel shows Captions rather than the huddle's Thread; captions are
+//     side-by-side only (the "Show captions" menu), never the closed-caption overlay;
 //   - a "Claude session" dropdown, always in view (in the Captions list's header), picks one of the Claude Code
 //     sessions of the workspace's folder (Claude Desktop's or the CLI's, worktrees included, from ~/.claude/projects),
 //     or "(New session)", the default, started with the first question;
@@ -84,6 +85,7 @@
       .chip:hover, .chip.open { opacity: 1; }
       .rec { bottom: 102px; }
       .rec.on { opacity: 1; color: #fff; background: #e01e5a; }
+      .rec.alarm { opacity: 1; color: #1d1c1d; background: #ecb22e; }
       .menu { position: fixed; z-index: 2147483647; min-width: 240px; max-width: 360px; max-height: 50vh; overflow: auto; padding: 4px 0;
         border-radius: 8px; background: #222529; color: #d1d2d3; box-shadow: 0 0 0 1px rgba(255,255,255,.13), 0 4px 12px rgba(0,0,0,.4); }
       .menu .head { padding: 4px 12px; opacity: .6; }
@@ -204,10 +206,16 @@
     const rec = el("button", "chip rec", "● Rec");
     rec.tabIndex = -1;
     let recordingSince = null;
+    // A problem with the recording while it runs (the call's sound not being recorded): shown on the chip.
+    let recordingAlarm = null;
     const showRec = () => {
       const seconds = recordingSince ? Math.floor((Date.now() - recordingSince) / 1000) : 0;
-      rec.textContent = recordingSince ? `● ${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}` : "● Rec";
-      rec.classList.toggle("on", !!recordingSince);
+      const time = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+      rec.textContent = recordingSince ? `${recordingAlarm ? "⚠" : "●"} ${time}` : "● Rec";
+      rec.title = recordingAlarm ?? "";
+      rec.setAttribute("aria-label", recordingAlarm ? `Recording problem: ${recordingAlarm}` : recordingSince ? `Recording, ${time}` : "Start recording");
+      rec.classList.toggle("on", !!recordingSince && !recordingAlarm);
+      rec.classList.toggle("alarm", !!recordingSince && !!recordingAlarm);
     };
     setInterval(() => recordingSince && showRec(), 1000);
     rec.addEventListener("mousedown", (event) => (event.preventDefault(), (rec.disabled = true), send({ type: "record" })));
@@ -421,6 +429,55 @@
     new MutationObserver(pickCaptions).observe(document.body, { childList: true, subtree: true });
     pickCaptions();
 
+    // Side-by-side captions only, never the closed-caption overlay: once the huddle's menu is there, its "Show
+    // captions" submenu (two check items) is set, each item clicked only if it is wrong; checked again a little later,
+    // as captions turning on by default can come after. The menu opens and closes in a moment; never while one is open.
+    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const captionItem = (label) =>
+      [...document.querySelectorAll('[data-qa="huddle_sidebar_footer_buttons_feedback_menu"]')].find((item) => item.innerText.trim() === label);
+    async function captionsSubmenu() {
+      document.querySelector('[data-qa="huddle_toolbar_menu_button"]').click();
+      await wait(500);
+      const show = [...document.querySelectorAll('[role="menuitem"]')].find((item) => item.innerText.trim() === "Show captions");
+      if (!show) return false;
+      show.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      show.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+      show.click();
+      await wait(600);
+      return true;
+    }
+    const closeMenus = () => document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, bubbles: true }));
+    async function setCaption(label, on) {
+      if (!(await captionsSubmenu())) return closeMenus(), `no "Show captions"`;
+      const item = captionItem(label);
+      const was = item?.getAttribute("aria-checked") === "true";
+      if (item && was !== on) item.click();
+      await wait(300);
+      if (document.querySelector('[role="menu"]')) closeMenus();
+      await wait(300);
+      return !item ? `no "${label}"` : was === on ? `${label} already ${on ? "on" : "off"}` : `${label} turned ${on ? "on" : "off"}`;
+    }
+    let settingCaptions = false;
+    async function captionsSideBySideOnly() {
+      if (settingCaptions || !document.querySelector('[data-qa="huddle_toolbar_menu_button"]') || document.querySelector('[role="menu"]')) return false;
+      settingCaptions = true;
+      try {
+        const results = [await setCaption("Side-by-side", true), await setCaption("Closed captions", false)];
+        send({ type: "log", text: `captions: ${results.join("; ")}` });
+      } catch (caught) {
+        send({ type: "log", text: `captions: ${caught.message}` });
+      } finally {
+        settingCaptions = false;
+      }
+      return true;
+    }
+    const captionsTimer = setInterval(async () => {
+      if (await captionsSideBySideOnly()) {
+        clearInterval(captionsTimer);
+        setTimeout(captionsSideBySideOnly, 15000);
+      }
+    }, 3000);
+
     window.__powertoys = {
       receive(message) {
         if (message.type === "sessions") {
@@ -437,6 +494,7 @@
         } else if (message.type === "recording") {
           rec.disabled = false;
           recordingSince = message.since ?? null;
+          recordingAlarm = message.alarm ?? null;
           showRec();
         } else if (message.type === "answer") {
           const answer = answers.get(message.id);
@@ -481,6 +539,8 @@
       huddle.session = chosen ? { id: chosen.id, title: chosen.title } : null;
       reply(contents, { type: "assigned", session: huddle.session });
       log(`huddle: questions go to "${chosen?.title ?? "a new session"}"`);
+    } else if (message.type === "log") {
+      log(`huddle window: ${String(message.text).slice(0, 300)}`);
     } else if (message.type === "record") {
       if (recordings.has(contents.id)) await stopRecording(contents, false);
       else await startRecording(contents);
@@ -773,15 +833,20 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
 
   // --- Recording a huddle --------------------------------------------------------------------------------------
   // Every huddle is recorded (huddle.autoRecord, default true; "● Rec" in the huddle window stops and starts it): the
-  // huddle window's picture, the sound the computer plays (the call, and any other sound) and your microphone, to .mkv in
-  // huddle.recordingsFolder (default powertoys\recordings). When the huddle ends, Slack asks whether to keep it.
+  // huddle window's picture, the call's sound (taken in Slack's page from the huddle's incoming tracks, whatever speaker
+  // plays it) and your microphone, to .mkv in huddle.recordingsFolder (default powertoys\recordings), with the
+  // computer's sound as a backup track. When the huddle ends, Slack asks whether to keep it, and says whether the call's
+  // sound was recorded.
   //
   // A recording must never be lost or corrupted, so:
-  //   - a hidden window of Powertoys' own records (MediaRecorder) the huddle window, the computer's sound output
-  //     (loopback, which leaves the call playing) and your microphone; every half second the main process takes what it
-  //     recorded (H.264 from the graphics card's encoder), appends it to the file and flushes it to the disk (fsync):
-  //     a crash loses at most about a second, and Matroska cut short still plays; the whole part is also kept in
-  //     memory (while 8 GB stays free), so a refused write loses nothing;
+  //   - a hidden window of Powertoys' own records (MediaRecorder) the huddle window with your microphone, and the
+  //     computer's sound output (loopback, which leaves the call playing) beside it; every half second the main process
+  //     takes what it recorded (H.264 from the graphics card's encoder), appends it to the file and flushes it to the
+  //     disk (fsync): a crash loses at most about a second, and Matroska cut short still plays; the whole part is also
+  //     kept in memory (while 8 GB stays free), so a refused write loses nothing;
+  //   - the call's sound comes in half-second pieces from Slack's page, appended and flushed the same way; if they stop
+  //     coming, or no sound from the huddle reaches the recording, the huddle window's chip turns yellow, a notice
+  //     says so, and the tap restarts; at Slack's start the tap is checked;
   //   - <recording>.json beside it says whether it is still recording; one left "recording" or "stopped" by a crash
   //     or a quit is finished and offered again the next time Slack starts;
   //   - if the recorder fails (its page crashes, MediaRecorder errs, the disk refuses a write), a new part starts at
@@ -809,7 +874,19 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     try {
       saved = JSON.parse(fs.readFileSync(json, "utf8"));
     } catch {}
-    const fields = { status, where: recording.where, since: recording.since, parts: recording.parts, teamId: recording.teamId ?? saved.teamId ?? null };
+    const fields = {
+      status,
+      where: recording.where,
+      since: recording.since,
+      parts: recording.parts,
+      teamId: recording.teamId ?? saved.teamId ?? null,
+      // For lining the call's sound up with the parts, also after a crash.
+      starts: recording.starts ?? saved.starts ?? {},
+      sounds: recording.sounds ?? saved.sounds ?? {},
+      calls: recording.calls ?? saved.calls ?? [],
+      callStats: recording.callStats ?? saved.callStats ?? null,
+      check: recording.check ?? saved.check ?? null,
+    };
     fs.writeFileSync(`${json}.tmp`, JSON.stringify({ ...saved, ...fields }, null, 2));
     fs.renameSync(`${json}.tmp`, json);
   }
@@ -817,9 +894,12 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
   // One capture (the main process answers it): the huddle window's picture and the sound the computer plays
   // ("loopback"). Not the audio of Slack's page: capturing a page's audio takes it off the speakers (Electron forces
   // it), so the call would go silent. Echo cancellation, noise suppression and auto gain are off for it: echo
-  // cancellation would remove exactly what the speakers play, the call.
+  // cancellation would remove exactly what the speakers play.
+  // Two recorders: the picture with your microphone (the part's file), and the computer's sound on its own (a backup
+  // beside it, <part>.sound.webm). The call itself is recorded in Slack's page (powertoys/page-call): the computer's
+  // sound is only what the default speakers play, which misses a call played on other ones (headphones, say).
   // withVideo false: the huddle window couldn't be captured (minimized, hidden), so the capture's picture (a screen,
-  // which getDisplayMedia needs) is dropped and the sound alone is recorded: the call and the microphone.
+  // which getDisplayMedia needs) is dropped and the sound alone is recorded.
   function recorderScript({ withVideo }) {
     return (async () => {
       const screen = await navigator.mediaDevices.getDisplayMedia({
@@ -830,43 +910,53 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
       try {
         mic = await navigator.mediaDevices.getUserMedia({ audio: true });
       } catch {}
-      const context = new AudioContext();
-      const mix = context.createMediaStreamDestination();
-      for (const source of [screen, mic]) if (source?.getAudioTracks().length) context.createMediaStreamSource(source).connect(mix);
       if (!withVideo) screen.getVideoTracks().forEach((track) => track.stop());
-      const stream = new MediaStream([...(withVideo ? screen.getVideoTracks() : []), ...mix.stream.getAudioTracks()]);
-      // H.264 is encoded by the graphics card (Media Foundation: NVENC, Quick Sync); VP8 only where it can't be.
-      const mimeType = (withVideo ? ["video/webm;codecs=h264,opus", "video/webm;codecs=vp8,opus"] : ["audio/webm;codecs=opus"]).find((type) => MediaRecorder.isTypeSupported(type));
-      const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8000000 });
-      const chunks = [];
       let failed = null;
-      recorder.ondataavailable = (event) => event.data.size && chunks.push(event.data);
-      recorder.onerror = (event) => (failed = event.error?.message ?? "MediaRecorder failed");
-      // What was recorded since the last call, as base64, and whether the recorder failed.
-      window.takeRecorded = async () => {
-        const blob = new Blob(chunks.splice(0));
-        let data = "";
-        if (blob.size) {
-          const url = await new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result);
-            reader.readAsDataURL(blob);
-          });
-          data = url.slice(url.indexOf(",") + 1);
-        }
-        return { data, failed };
+      // A recorder whose pieces are kept until the main process takes them.
+      const recorderOf = (tracks, types, options = {}) => {
+        if (!tracks.length) return null;
+        const mimeType = types.find((type) => MediaRecorder.isTypeSupported(type));
+        const recorder = new MediaRecorder(new MediaStream(tracks), { mimeType, ...options });
+        recorder.chunks = [];
+        recorder.ondataavailable = (event) => event.data.size && recorder.chunks.push(event.data);
+        recorder.onerror = (event) => (failed = event.error?.message ?? "MediaRecorder failed");
+        return recorder;
       };
-      window.stopRecording = () =>
+      // H.264 is encoded by the graphics card (Media Foundation: NVENC, Quick Sync); VP8 only where it can't be.
+      const main = recorderOf(
+        [...(withVideo ? screen.getVideoTracks() : []), ...(mic?.getAudioTracks() ?? [])],
+        withVideo ? ["video/webm;codecs=h264,opus", "video/webm;codecs=vp8,opus"] : ["audio/webm;codecs=opus"],
+        { videoBitsPerSecond: 8000000 },
+      );
+      const sound = recorderOf(screen.getAudioTracks(), ["audio/webm;codecs=opus"]);
+      if (!main && !sound) throw new Error("nothing to record: no picture, microphone or sound");
+      const base64 = async (recorder) => {
+        const blob = new Blob(recorder?.chunks.splice(0) ?? []);
+        if (!blob.size) return "";
+        const url = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.readAsDataURL(blob);
+        });
+        return url.slice(url.indexOf(",") + 1);
+      };
+      // What was recorded since the last call, as base64, and whether a recorder failed.
+      window.takeRecorded = async () => ({ data: await base64(main), sound: await base64(sound), failed });
+      const stopped = (recorder) =>
         new Promise((resolve) => {
-          if (recorder.state === "inactive") return resolve(true);
-          recorder.onstop = () => {
-            for (const track of [...screen.getTracks(), ...(mic?.getTracks() ?? [])]) track.stop();
-            resolve(true);
-          };
+          if (!recorder || recorder.state === "inactive") return resolve(true);
+          recorder.onstop = () => resolve(true);
           recorder.stop();
         });
-      recorder.start(500);
-      return { sound: screen.getAudioTracks().length > 0, mic: !!mic, mimeType };
+      window.stopRecording = async () => {
+        await Promise.all([stopped(main), stopped(sound)]);
+        for (const track of [...screen.getTracks(), ...(mic?.getTracks() ?? [])]) track.stop();
+        return true;
+      };
+      const startedAt = Date.now();
+      main?.start(500);
+      sound?.start(500);
+      return { startedAt, sound: !!sound, mic: !!mic, mimeType: main?.mimeType ?? sound.mimeType };
     })();
   }
 
@@ -876,9 +966,11 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     if (!huddleWindow) throw new Error("the huddle window is gone");
     const number = recording.parts.length + 1;
     const file = `${recording.base}${number > 1 ? ` (part ${number})` : ""}.mkv`;
-    const part = { file, fd: fs.openSync(file, "a"), recorder: null, timer: null, crashed: false, busy: null, copy: [], copying: true };
+    const soundFile = file.replace(/\.mkv$/, ".sound.webm");
+    const part = { file, fd: fs.openSync(file, "a"), soundFile, soundFd: fs.openSync(soundFile, "a"), recorder: null, timer: null, crashed: false, busy: null, copy: [], copying: true };
     recording.part = part;
     recording.parts.push(file);
+    recording.sounds[file] = soundFile;
     writeStatus(recording, "recording");
     part.recorder = new electron.BrowserWindow({ show: false, webPreferences: { backgroundThrottling: false, partition: "powertoys-recorder" } });
     part.recorder.webContents.on("render-process-gone", (event, details) => {
@@ -897,6 +989,9 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     if (!source) warn("recording: the huddle window can't be captured; recording the sound only");
     electron.session.fromPartition("powertoys-recorder").setDisplayMediaRequestHandler((request, callback) => callback({ video: source ?? screen, audio: "loopback" }));
     const got = await inRecorder(part, `(${recorderScript.toString()})(${JSON.stringify({ withVideo: Boolean(source) })})`, 15000);
+    // When the part's first moment was recorded: the call's sound is lined up with it when the recording finishes.
+    recording.starts[file] = got.startedAt;
+    writeStatus(recording, "recording");
     // One take at a time, so the pieces reach the file in order.
     part.timer = setInterval(() => {
       if (part.busy) return;
@@ -905,7 +1000,7 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
         .catch((caught) => setTimeout(() => partFailed(recording, part, caught.message)))
         .finally(() => (part.busy = null));
     }, 500);
-    log(`recording the huddle in ${recording.where} to ${file} (${got.mimeType}, call sound ${got.sound ? "yes" : "no"}, microphone ${got.mic ? "yes" : "no"})`);
+    log(`recording the huddle in ${recording.where} to ${file} (${got.mimeType}, computer sound ${got.sound ? "yes" : "no"}, microphone ${got.mic ? "yes" : "no"})`);
   }
 
   /** Runs a script in a part's recorder, giving up after `ms` (a crashed page never answers). */
@@ -923,7 +1018,17 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
    * own folder and goes on there, so nothing recorded is lost.
    */
   async function writeRecorded(recording, part) {
-    const { data, failed } = await inRecorder(part, "window.takeRecorded()");
+    const { data, sound, failed } = await inRecorder(part, "window.takeRecorded()");
+    // The computer's sound is a backup: a refused write is reported once, and the part goes on.
+    if (sound && !part.soundBroken) {
+      try {
+        fs.writeSync(part.soundFd, Buffer.from(sound, "base64"));
+        fs.fsyncSync(part.soundFd);
+      } catch (caught) {
+        part.soundBroken = true;
+        warn(`recording: couldn't write the computer's sound to ${part.soundFile} (${caught.message}); the backup stops for this part`);
+      }
+    }
     if (data) {
       const piece = Buffer.from(data, "base64");
       if (part.copying && os.freemem() < 8 * 1024 ** 3) {
@@ -955,6 +1060,10 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     fs.fsyncSync(fd);
     warn(`recording: couldn't write ${part.file} (${caught.message}); it goes on in ${file}`);
     recording.parts[recording.parts.indexOf(part.file)] = file;
+    for (const map of [recording.starts, recording.sounds]) {
+      map[file] = map[part.file];
+      delete map[part.file];
+    }
     recording.base = path.join(fallbackFolder(), path.basename(recording.base));
     part.file = file;
     part.fd = fd;
@@ -974,10 +1083,12 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
       part.recorder.destroy();
     }
     part.copy = [];
-    try {
-      fs.fsyncSync(part.fd);
-      fs.closeSync(part.fd);
-    } catch {}
+    for (const fd of [part.fd, part.soundFd]) {
+      try {
+        fs.fsyncSync(fd);
+        fs.closeSync(fd);
+      } catch {}
+    }
   }
 
   /** A part failed while the huddle goes on: it is closed as it is and a new part starts. */
@@ -999,6 +1110,152 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     slackPage()?.send("powertoys:notice", { text: "The huddle's recording stopped and couldn't restart; what was recorded is kept." });
   }
 
+  // --- The call's sound, where Slack's page receives it (powertoys/page-call) ------------------------------------
+  // The other people's sound is recorded from the huddle's incoming WebRTC tracks in Slack's page, before it is played,
+  // so it doesn't matter which speaker plays it. Half-second pieces come here and are appended and flushed to
+  // <recording>.call.webm (.call-2.webm… after a restart); when the recording finishes it goes into each part as its own
+  // track, and mixed with the microphone. Alarms (the chip in the huddle window turns yellow, and a notice): no piece
+  // for 5 seconds, or no incoming track for 15 seconds; the tap then restarts.
+  const calls = new Map(); // tap id -> { recording, call }
+  let tapNumber = 0;
+  const callCommand = (action, id) => slackPage()?.send("powertoys:call-command", { action, id });
+
+  function alarm(recording, text) {
+    if (recording.alarm === text) return;
+    recording.alarm = text;
+    if (text) {
+      warn(`recording: ${text}`);
+      slackPage()?.send("powertoys:notice", { text: `Recording: ${text}` });
+    } else log("recording: the call's sound is being recorded again");
+    if (!recording.stopping) reply(recording.contents, { type: "recording", since: recording.since, alarm: text });
+  }
+
+  /** A message from the page's tap. */
+  function callEvent(message) {
+    if (message.type === "probe") return probes.get(message.id)?.(message);
+    const tapped = calls.get(message.id);
+    if (!tapped) return;
+    const { recording, call } = tapped;
+    if (message.type === "started") return call.started?.(message);
+    if (message.type === "stopped") return call.ended?.();
+    if (message.type === "error") return restartCall(recording, `the tap failed (${message.error})`);
+    if (message.type === "chunk") {
+      if (message.sequence !== call.next) warn(`recording: call piece ${message.sequence} came when ${call.next} was due`);
+      call.next = message.sequence + 1;
+      call.lastPiece = Date.now();
+      try {
+        fs.writeSync(call.fd, Buffer.from(message.data, "base64"));
+        fs.fsyncSync(call.fd);
+      } catch (caught) {
+        restartCall(recording, `couldn't write ${call.file} (${caught.message})`);
+      }
+      return;
+    }
+    if (message.type === "level") {
+      const stats = recording.callStats;
+      stats.seconds++;
+      stats.peak = Math.max(stats.peak, message.level);
+      if (message.level > 0.001) stats.heard++;
+      recording.noTrack = message.tracks ? 0 : (recording.noTrack ?? 0) + 1;
+      if (recording.noTrack === 15) alarm(recording, "no sound from the huddle has reached the recording for 15 seconds");
+      else if (message.tracks && recording.alarm?.startsWith("no sound")) alarm(recording, null);
+      if (stats.seconds % 30 === 0) writeStatus(recording, recording.status);
+    }
+  }
+
+  async function startCall(recording) {
+    const number = recording.calls.length + 1;
+    const id = `${recording.contents.id}-${++tapNumber}`;
+    const call = { file: `${recording.base}.call${number > 1 ? `-${number}` : ""}.webm`, startedAt: null, next: 0, id };
+    call.fd = fs.openSync(call.file, "a");
+    recording.calls.push(call);
+    calls.set(id, { recording, call });
+    try {
+      const started = await new Promise((resolve, reject) => {
+        call.started = resolve;
+        setTimeout(() => reject(new Error("Slack's page didn't start the tap within 5 seconds")), 5000);
+        callCommand("start", id);
+      });
+      call.startedAt = started.startedAt;
+      call.lastPiece = Date.now();
+      writeStatus(recording, recording.status);
+      log(`recording the huddle's sound from Slack's page to ${call.file} (${started.tracks} track${started.tracks === 1 ? "" : "s"} so far)`);
+      // Pieces stopping is the tap failing (the page reloaded, the recorder died): alarm, and a new tap.
+      call.watchdog = setInterval(() => {
+        if (Date.now() - call.lastPiece < 5000) return;
+        alarm(recording, "the huddle's sound stopped reaching the recording; restarting it");
+        restartCall(recording, "no piece for 5 seconds");
+      }, 1000);
+    } catch (caught) {
+      endCall(recording, call);
+      recording.calls.pop();
+      if (fs.existsSync(call.file) && !fs.statSync(call.file).size) fs.rmSync(call.file);
+      throw caught;
+    }
+  }
+
+  function endCall(recording, call) {
+    clearInterval(call.watchdog);
+    calls.delete(call.id);
+    try {
+      fs.fsyncSync(call.fd);
+      fs.closeSync(call.fd);
+    } catch {}
+  }
+
+  /** Stops the current tap, taking its last piece (within 5 seconds). */
+  async function stopCall(recording) {
+    const call = recording.calls.at(-1);
+    if (!call || !calls.has(call.id)) return;
+    clearInterval(call.watchdog);
+    await new Promise((resolve) => {
+      call.ended = resolve;
+      setTimeout(resolve, 5000);
+      callCommand("stop", call.id);
+    });
+    endCall(recording, call);
+  }
+
+  /** The tap failed or went quiet: a new file and a new tap, a few tries; the computer's sound is the backup meanwhile. */
+  async function restartCall(recording, why) {
+    if (recording.stopping || recording.callRestarting) return;
+    recording.callRestarting = true;
+    warn(`recording: ${why}; restarting the call's tap`);
+    recording.callStats.restarts++;
+    try {
+      await stopCall(recording);
+      for (let attempt = 1; attempt <= 3 && !recording.stopping; attempt++) {
+        try {
+          await startCall(recording);
+          if (recording.alarm?.startsWith("the huddle's sound stopped")) alarm(recording, null);
+          return;
+        } catch (caught) {
+          warn(`recording: the call's tap didn't restart (${caught.message})`);
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+      }
+      if (!recording.stopping) alarm(recording, "the huddle's sound can't be recorded; only the computer's sound and your microphone are");
+    } finally {
+      recording.callRestarting = false;
+    }
+  }
+
+  // At Slack's start: the tap is in the page and can record, known before any huddle.
+  const probes = new Map();
+  async function probeCall() {
+    const id = `probe-${++tapNumber}`;
+    const answer = await new Promise((resolve) => {
+      probes.set(id, resolve);
+      setTimeout(() => resolve(null), 10000);
+      callCommand("probe", id);
+    });
+    probes.delete(id);
+    if (answer?.recorder) return log("recording: the huddle's sound can be recorded (the page's tap answered)");
+    const why = answer ? "Slack's page can't record Opus" : "the tap in Slack's page didn't answer";
+    warn(`recording: ${why}`);
+    slackPage()?.send("powertoys:notice", { text: `Huddle recordings can't record the call's sound (${why}); only the computer's sound and your microphone would be.` });
+  }
+
   async function startRecording(contents) {
     if (recordings.has(contents.id)) return;
     const huddleWindow = electron.BrowserWindow.fromWebContents(contents);
@@ -1016,13 +1273,32 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
       fs.mkdirSync(folder, { recursive: true });
     }
     const teamId = /\/client\/([A-Z0-9]+)/.exec(slackPage()?.getURL() ?? "")?.[1] ?? null;
-    const recording = { contents, where, teamId, since: Date.now(), base: path.join(folder, `${stamp} ${where.replace(/[\\/:*?"<>|]/g, "_")}`), parts: [], part: null, stopping: false };
+    const recording = {
+      contents,
+      where,
+      teamId,
+      since: Date.now(),
+      base: path.join(folder, `${stamp} ${where.replace(/[\\/:*?"<>|]/g, "_")}`),
+      parts: [],
+      part: null,
+      stopping: false,
+      starts: {},
+      sounds: {},
+      calls: [],
+      callStats: { seconds: 0, heard: 0, playing: 0, missed: 0, peak: 0, restarts: 0 },
+    };
     recordings.set(contents.id, recording);
+    // The call's sound first: Slack's own, whatever speaker it plays on.
+    try {
+      await startCall(recording);
+    } catch (caught) {
+      alarm(recording, `Slack's own sound can't be recorded (${caught.message}); only the computer's sound and your microphone are`);
+    }
     let failure = null;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         await startPart(recording);
-        return reply(contents, { type: "recording", since: recording.since });
+        return reply(contents, { type: "recording", since: recording.since, alarm: recording.alarm ?? null });
       } catch (caught) {
         failure = caught;
         warn(`recording: didn't start (attempt ${attempt}: ${caught.message})`);
@@ -1032,8 +1308,12 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
       }
     }
     recordings.delete(contents.id);
-    writeStatus(recording, recording.parts.length ? "stopped" : "empty");
+    recording.stopping = true;
+    await stopCall(recording);
+    // The call's sound may be all there is: it is finished (and offered) like any recording.
+    writeStatus(recording, recording.parts.length || recording.calls.length ? "stopped" : "empty");
     reply(contents, { type: "recording", since: null });
+    if (!recording.parts.length && recording.calls.length) finish(recording).catch((caught) => warn(`recording: ${caught.message}`));
     throw failure;
   }
 
@@ -1043,6 +1323,10 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     if (file && fs.existsSync(file) && fs.statSync(file).size === 0) {
       fs.rmSync(file);
       recording.parts.pop();
+      const sound = recording.sounds?.[file];
+      if (sound && fs.existsSync(sound) && fs.statSync(sound).size === 0) fs.rmSync(sound);
+      delete recording.sounds?.[file];
+      delete recording.starts?.[file];
     }
   }
 
@@ -1063,13 +1347,128 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     }
   }
 
+  const probeOf = async (file) => JSON.parse(await execFile("ffprobe", ["-v", "error", "-show_entries", "format=duration:stream=codec_type", "-of", "json", file]));
+
+  /**
+   * Puts the call's sound into a part, as tracks: "Call and microphone" (the one players and transcription use),
+   * "Call (from Slack)", "Microphone", "Computer sound (backup)". Each piece of the call (one per tap) goes where it
+   * was recorded, by its first moment against the part's. The part is replaced only by a copy ffprobe reads back whole,
+   * with every track -> { call: seconds of the call it holds }.
+   */
+  async function addCallTracks(recording, file) {
+    const probe = await probeOf(file);
+    const duration = Number(probe.format?.duration);
+    if (!(duration > 0)) throw new Error("its length can't be read");
+    const hasVideo = probe.streams.some((stream) => stream.codec_type === "video");
+    const hasMic = probe.streams.some((stream) => stream.codec_type === "audio");
+    const start = recording.starts?.[file];
+    const sound = recording.sounds?.[file];
+    const hasSound = Boolean(sound && fs.existsSync(sound) && fs.statSync(sound).size > 0);
+    // The call's pieces that overlap the part, and where each begins in it (seconds; negative: before the part).
+    const pieces = [];
+    for (const call of recording.calls ?? []) {
+      if (!start || !call.startedAt || !call.duration) continue;
+      const at = (call.startedAt - start) / 1000;
+      const overlap = Math.min(duration, at + call.duration) - Math.max(0, at);
+      if (overlap > 0) pieces.push({ file: call.file, at, overlap });
+    }
+    if (!pieces.length && !hasSound) return { call: 0 };
+    const inputs = ["-i", file];
+    const filters = [];
+    pieces.forEach((piece, i) => {
+      inputs.push("-i", piece.file);
+      filters.push(piece.at >= 0 ? `[${i + 1}:a]adelay=${Math.round(piece.at * 1000)}:all=1[p${i}]` : `[${i + 1}:a]atrim=start=${-piece.at},asetpts=PTS-STARTPTS[p${i}]`);
+    });
+    const soundInput = hasSound ? (inputs.push("-i", sound), inputs.length / 2 - 1) : null;
+    let other = `[${soundInput}:a]`;
+    if (pieces.length) {
+      filters.push(pieces.length > 1 ? `${pieces.map((piece, i) => `[p${i}]`).join("")}amix=inputs=${pieces.length}:duration=longest:normalize=0[call]` : "[p0]anull[call]");
+      filters.push("[call]apad,asplit=2[callmix][callout]"); // as long as the part (-t ends it)
+      other = "[callmix]";
+    }
+    filters.push(hasMic ? `${other}[0:a:0]amix=inputs=2:duration=longest:normalize=0[mix]` : `${other}anull[mix]`);
+    const maps = [...(hasVideo ? ["-map", "0:v"] : []), "-map", "[mix]"];
+    const tracks = [pieces.length ? "Call and microphone" : "Computer sound and microphone"];
+    if (pieces.length) {
+      maps.push("-map", "[callout]");
+      tracks.push("Call (from Slack)");
+    }
+    if (hasMic) {
+      maps.push("-map", "0:a:0");
+      tracks.push("Microphone");
+    }
+    if (hasSound) {
+      maps.push("-map", `${soundInput}:a`);
+      tracks.push("Computer sound (backup)");
+    }
+    const encoded = pieces.length ? 2 : 1; // the mix (and the call) are encoded (AAC); the microphone and backup are copied
+    const perTrack = tracks.flatMap((title, i) => [
+      `-c:a:${i}`,
+      ...(i < encoded ? ["aac", `-b:a:${i}`, "160k"] : ["copy"]),
+      `-metadata:s:a:${i}`,
+      `title=${title}`,
+      `-disposition:a:${i}`,
+      i === 0 ? "default" : "0",
+    ]);
+    const copy = `${file}.tracks.mkv`;
+    try {
+      await execFile("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", ...inputs, "-filter_complex", filters.join(";"), ...maps, "-c:v", "copy", ...perTrack, "-t", String(duration), "-f", "matroska", copy]);
+      const check = await probeOf(copy);
+      const audio = check.streams.filter((stream) => stream.codec_type === "audio").length;
+      if (!(Number(check.format?.duration) >= duration - 1) || audio !== tracks.length) throw new Error(`the copy isn't whole (${check.format?.duration} s, ${audio} sound tracks)`);
+      fs.renameSync(copy, file);
+    } catch (caught) {
+      fs.rmSync(copy, { force: true });
+      throw caught;
+    }
+    if (hasSound) fs.rmSync(sound, { force: true });
+    const call = pieces.reduce((sum, piece) => sum + piece.overlap, 0);
+    log(`recording: ${path.basename(file)} has ${tracks.join(", ")} (${Math.round(call)} s of the call)`);
+    return { call };
+  }
+
   /** Finishes a recording's parts and asks (in Slack's page) whether to keep them. */
   async function finish(recording) {
+    const callFiles = (recording.calls ?? []).filter((call) => fs.existsSync(call.file) && fs.statSync(call.file).size > 0);
+    // MediaRecorder's WebM has no length: rewritten with it (like the parts), then measured.
+    for (const call of callFiles) {
+      await repair(call.file);
+      call.duration = Number((await probeOf(call.file).catch(() => ({}))).format?.duration) || 0;
+    }
+    // Only the call's sound got recorded (the picture and microphone never started): that is the recording.
+    const callOnly = !recording.parts.length && callFiles.length > 0;
+    if (callOnly) recording.parts = callFiles.map((call) => call.file);
     if (!recording.parts.length) return writeStatus(recording, "empty");
-    for (const file of recording.parts) await repair(file);
+    const problems = [];
+    let callSeconds = 0;
+    if (!callOnly) {
+      for (const file of recording.parts) await repair(file);
+      for (const file of recording.parts) {
+        try {
+          callSeconds += (await addCallTracks(recording, file)).call;
+        } catch (caught) {
+          problems.push(`${path.basename(file)}: ${caught.message}`);
+          warn(`recording: couldn't add the call's tracks to ${file} (${caught.message}); its files are kept`);
+        }
+      }
+      // The call's own files go only once every second of them is in the parts.
+      const recorded = callFiles.reduce((sum, call) => sum + call.duration, 0);
+      if (!problems.length && recorded > 0 && callSeconds >= recorded - 1) for (const call of callFiles) fs.rmSync(call.file, { force: true });
+      else if (recorded > 0) warn(`recording: the call's sound is kept beside the recording (${Math.round(recorded)} s recorded, ${Math.round(callSeconds)} s in the parts)`);
+    }
+    const stats = recording.callStats;
+    const checks = [];
+    const span = (seconds) => (seconds < 90 ? `${Math.round(seconds)} s` : `${Math.round(seconds / 60)} min`);
+    if (callOnly) checks.push("⚠ Only the call's sound was recorded: the picture and microphone couldn't be.");
+    else if (callSeconds > 0) checks.push(`Call sound recorded from Slack (${span(callSeconds)}${stats?.heard ? `, with sound in ${span(stats.heard)} of it` : ""}).`);
+    else checks.push("⚠ The call's sound wasn't recorded from Slack; the computer's sound is in its place.");
+    if (stats?.restarts) checks.push(`The call's recording restarted ${stats.restarts} time${stats.restarts === 1 ? "" : "s"}.`);
+    if (problems.length) checks.push(`⚠ The call's tracks couldn't be added (${problems.join("; ")}); all its files are kept beside the recording.`);
+    recording.check = checks.join(" ");
     writeStatus(recording, "finished");
+    log(`recording finished: ${recording.check}`);
     const minutes = Math.max(1, Math.round((Date.now() - recording.since) / 60000));
-    slackPage()?.send("powertoys:recording-done", { base: recording.base, parts: recording.parts.length, where: recording.where, minutes, recovered: recording.recovered });
+    slackPage()?.send("powertoys:recording-done", { base: recording.base, parts: recording.parts.length, where: recording.where, minutes, recovered: recording.recovered, check: recording.check });
   }
 
   async function stopRecording(contents, ended) {
@@ -1078,6 +1477,7 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     recording.stopping = true;
     recordings.delete(contents.id);
     if (recording.part) await endPart(recording, recording.part);
+    await stopCall(recording).catch((caught) => warn(`recording: ${caught.message}`));
     dropEmptyPart(recording);
     writeStatus(recording, "stopped");
     log(`recording stopped: ${recording.parts.join(", ")}`);
@@ -1206,7 +1606,7 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
       notice(`Transcribing the recording${recording.parts.length > 1 ? ` (part ${i + 1} of ${recording.parts.length})` : ""}: uploading its sound to Slack, privately…`);
       const audio = path.join(os.tmpdir(), `powertoys-${Date.now()}.m4a`);
       try {
-        await execFile("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", part, "-vn", "-c:a", "aac", "-b:a", "96k", audio]);
+        await execFile("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", part, "-map", "0:a:0", "-c:a", "aac", "-b:a", "96k", audio]);
         const fileId = await uploadPrivately(team, audio, `${path.basename(recording.base)}${recording.parts.length > 1 ? ` (part ${i + 1})` : ""} (audio)`);
         updateRecording(recording.base, { slackFiles: [...(recordingAt(recording.base).slackFiles ?? []), fileId] });
         notice("Uploaded; Slack is transcribing it…");
@@ -1324,6 +1724,13 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     electron.ipcMain.handle("powertoys:huddle-cancelled", () => ringCancelled("main"));
     electron.ipcMain.handle("powertoys:recordings", () => listRecordings());
     electron.ipcMain.handle("powertoys:recording-open", (event, request) => openRecordingFile(request));
+    electron.ipcMain.on("powertoys:call-event", (event, detail) => {
+      try {
+        callEvent(JSON.parse(detail));
+      } catch (caught) {
+        warn(`recording: a message from the call's tap: ${caught.message}`);
+      }
+    });
     electron.app.prependListener("before-quit", finishBeforeQuit);
     electron.app.prependListener("will-quit", finishBeforeQuit);
     // Once Slack's page is up (it shows the question), recordings a crash or a quit left unfinished.
@@ -1331,6 +1738,10 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
       if (!slackPage() || slackPage().isLoading()) return;
       clearInterval(recover);
       setTimeout(() => recoverRecordings().catch((caught) => warn(`recording: ${caught.message}`)), 15000);
+      // Whether the call's sound can be recorded, known before any call: a notice if it can't.
+      if (readSettings().huddle?.autoRecord !== false) {
+        probeCall().catch((caught) => warn(`recording: ${caught.message}`));
+      }
     }, 5000);
   };
 });

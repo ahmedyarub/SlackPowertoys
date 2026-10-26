@@ -52,6 +52,8 @@
       .notice label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; white-space: nowrap; }
       .notice input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: #007a5a; cursor: pointer; }
       .notice input:focus-visible, .notice button:focus-visible { outline: 2px solid #1d9bd1; outline-offset: 2px; }
+      .notice .verdict { font-size: 12px; opacity: .85; }
+      .notice .verdict.warn { color: #ecb22e; opacity: 1; }
     </style>`;
     // Slack sends keys typed outside a text field to the message box; from outside the shadow root our fields don't
     // look like text fields, so their keys stop here.
@@ -124,7 +126,7 @@
    * transcribes first) and OK. Unticking Keep and pressing OK asks before the recording goes to the Recycle Bin;
    * closing the prompt or leaving it keeps the recording.
    */
-  function recordingPrompt({ base, parts, where, minutes, recovered }) {
+  function recordingPrompt({ base, parts, where, minutes, recovered, check: verdict }) {
     const root = ui();
     root.querySelector(".notice")?.remove();
     const node = document.createElement("div");
@@ -152,8 +154,11 @@
     keep.input.addEventListener("change", () => keep.input.checked || ((transcribe.input.checked = false), (summarize.input.checked = false)));
     const close = button("×", () => node.remove(), "close");
     close.title = "Close (the recording is kept)";
+    // What the end-of-call check found (the call's sound recorded or not); a problem is announced.
+    const verdictNode = verdict ? Object.assign(document.createElement("span"), { textContent: verdict, className: verdict.includes("⚠") ? "verdict warn" : "verdict" }) : "";
+    if (verdict?.includes("⚠")) verdictNode.setAttribute("role", "alert");
     const choices = () => {
-      node.replaceChildren(title, keep.wrap, transcribe.wrap, summarize.wrap, button("OK", apply), close);
+      node.replaceChildren(title, verdictNode, keep.wrap, transcribe.wrap, summarize.wrap, button("OK", apply), close);
       keep.input.focus();
     };
     const apply = () => {
@@ -407,6 +412,12 @@
       __webpack_require__("powertoys/page-history").hookSocket();
     } catch (caught) {
       log(`powertoys/page-history did not hook Slack's connection: ${caught.message}`);
+    }
+    // Also before Slack's scripts: the huddle's incoming sound, for recordings (powertoys/page-call).
+    try {
+      __webpack_require__("powertoys/page-call").hookCall();
+    } catch (caught) {
+      log(`powertoys/page-call did not hook the huddle's sound: ${caught.message}`);
     }
     electron.ipcRenderer.on("powertoys:notice", (event, { text }) => notice(text));
     // A huddle's recording, when the huddle ends: keep it (and show it) or delete it; kept unless you say otherwise.

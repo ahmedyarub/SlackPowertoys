@@ -70,7 +70,8 @@ patches/files/...           files that are entirely new (written for Powertoys),
 - **A transcript for every video:** each video or audio file posted gets Slack's own transcript requested right away
   (what "Generate transcript" does), so it is there when you need it (`"claude": {"autoTranscripts": false}` turns
   it off).
-- **Huddles:** the huddle window opens maximized with captions side by side instead of the huddle's thread. A
+- **Huddles:** the huddle window opens maximized with captions side by side instead of the huddle's thread (side by
+  side only: the closed-caption overlay is turned off). A
   "Claude session" dropdown in the captions panel picks one of your Claude Code sessions in the workspace's folder,
   or a new one (the default). Double-click a caption, select several and press **Ask Claude**, or right-click: the
   question is asked in that session (it stays there) by a fast model, and the answer shows in a pop-up you can drag
@@ -78,11 +79,14 @@ patches/files/...           files that are entirely new (written for Powertoys),
   Windows connects your paired
   headphones (found by their Bluetooth class, whatever their name; `"huddle": {"headphones": "<name>"}` picks a
   device, `null` turns it off). If Bluetooth was off, it goes off again when the huddle ends, or at Cancel/Decline.
-- **Recording every huddle:** the huddle window, everything the computer plays (so the call, which you keep hearing
-  as usual) and your microphone,
-  encoded by your graphics card, to `.mkv` in `"huddle": {"recordingsFolder"}`. Written and flushed to disk every
-  half second, kept in memory too, restarted in a new part if the recorder fails, finished before Slack quits and
-  recovered after a crash. When the huddle ends: **Transcribe** (Slack's own transcription, via a private upload,
+- **Recording every huddle:** the huddle window, the call's sound and your microphone, encoded by your graphics card,
+  to `.mkv` in `"huddle": {"recordingsFolder"}`. The call's sound is taken inside Slack, from the huddle's incoming
+  audio as it arrives (you keep hearing it as usual), so it is recorded whichever speaker or headphones play it; the
+  computer's sound output is kept too, as a backup track. Written and flushed to disk every half second, kept in
+  memory too, restarted in a new part if the recorder fails, finished before Slack quits and recovered after a
+  crash. If the call's sound stops reaching the recording, the Rec chip in the huddle window turns yellow, a notice
+  says so, and it restarts. The file has the tracks "Call and microphone" (the default), "Call", "Microphone" and
+  "Computer sound (backup)". When the huddle ends, Slack says whether the call's sound was recorded, and offers **Transcribe** (Slack's own transcription, via a private upload,
   saved beside the video and added to it as a subtitle track),
   **Summarize** (Claude) and **Keep** as checkboxes, or delete it (Recycle Bin, after a Yes/No); also in the panel's
   Recordings tab.
@@ -95,7 +99,9 @@ patches/files/...           files that are entirely new (written for Powertoys),
   `minMinutes` (default 5), `"claude": {"reminders": false}` turns the reminders off, `status` (default false: also show "Claude Code: working on <folder>" as your Slack
   status while a session works), `workspace` (a workspace id for folders that are not linked).
 - **Developer features** (they use Claude through the Claude Code CLI, signed in as you, with a lean prompt; Notion
-  through the Powertoys panel's Settings tab (Ctrl+Alt+P): sign in with an OAuth connection whose redirect URI is
+  through the Powertoys panel's Settings tab (Ctrl+Alt+P): **Sign in as you** (Notion's own MCP server, the one
+  Claude's Notion connector uses: link titles and previews then read everything you can open, teamspaces included),
+  and for saving pages, sign in with an OAuth connection whose redirect URI is
   `http://localhost:47821/notion/callback`, or paste an internal integration's secret; GitHub through the `gh` CLI):
   - **Notion:** link previews (title, path, status, assignees, last edit, first lines; notion.so, notion.site and
     app.notion.com links); a pasted link goes in at once, and its title, linked, replaces it once known (a Notion

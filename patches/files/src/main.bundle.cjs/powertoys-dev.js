@@ -129,7 +129,7 @@
     return cached(`title:${url}`, 10 * 60e3, async () => {
       const notion = __webpack_require__("powertoys/notion");
       if (notion.isNotionLink(url)) {
-        if (!notion.configured()) return null;
+        if (!notion.canRead()) return null;
         const info = await notion.pageInfo(url);
         return info.ticketId ? `${info.ticketId} ${info.title}` : info.title;
       }

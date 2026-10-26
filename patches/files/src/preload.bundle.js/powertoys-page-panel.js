@@ -275,6 +275,23 @@
     const signIn = el("button", "act", "Sign in with Notion");
     signIn.addEventListener("click", () => run(signIn, "notion-sign-in", () => ({ clientId: clientId.value, clientSecret: clientSecret.value }), [clientSecret]));
 
+    // As you, through Notion's MCP server: reads what you can read (teamspace pages too), for link titles and previews.
+    const asYouStatus = Object.assign(el("div", "sub", current.notionAsYou ? "Signed in as you." : ""), { role: "status" });
+    asYouStatus.setAttribute("aria-live", "polite");
+    const asYou = el("button", "act", current.notionAsYou ? "Sign in as you again" : "Sign in as you");
+    asYou.addEventListener("click", async () => {
+      asYou.disabled = true;
+      asYouStatus.textContent = "Finish signing in in your browser…";
+      try {
+        const me = await page.invoke("notion-sign-in-as-you");
+        asYouStatus.textContent = `Signed in${me.name ? ` as ${me.name}` : ""}. Link titles and previews read Notion as you.`;
+      } catch (caught) {
+        asYouStatus.textContent = `Not signed in: ${page.reason(caught)}`;
+      } finally {
+        asYou.disabled = false;
+      }
+    });
+
     const token = input(current.notion && !current.notionClientId ? saved : "Internal integration secret (ntn_…)", "", true);
     const save = el("button", "act", "Check and save");
     save.addEventListener("click", () => run(save, "notion-setup", () => ({ token: token.value }), [token]));
@@ -330,6 +347,10 @@
       language,
       languageHelp,
       languageStatus,
+      el("div", "group", "Notion: as you"),
+      steps("Link titles (with a ticket's ID) and previews read Notion as you, through Notion's own MCP server: everything you can open, teamspaces included, with no connection to share pages with."),
+      asYou,
+      asYouStatus,
       el("div", "group", "Notion: sign in (OAuth connection)"),
       steps(`notion.so/profile/integrations → New connection → OAuth, redirect URI ${current.notionRedirectUri ?? ""} → copy its client ID and secret. When Notion asks, pick the pages Powertoys may use; Claude puts each new page where it fits among them.`),
       clientId,

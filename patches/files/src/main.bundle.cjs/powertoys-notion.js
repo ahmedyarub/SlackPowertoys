@@ -11,7 +11,7 @@
   const electron = __webpack_require__(84157);
   const http = __webpack_require__(58611);
   const crypto = __webpack_require__(76982);
-  const { log, warn, readSettings } = __webpack_require__("powertoys/main");
+  const { log, warn, readSettings, updateSettings } = __webpack_require__("powertoys/main");
 
   const API = "https://api.notion.com/v1";
   const settings = () => ({ token: "", previews: true, ...readSettings().notion });
@@ -94,6 +94,19 @@
   function pageInfo(ref) {
     const id = notionId(ref);
     if (!id) return Promise.reject(new Error("not a Notion link"));
+    if (!mcpSignedIn()) return pageInfoViaConnection(id);
+    // As you first (it sees teamspace pages); the connection when that fails and is set up.
+    return cached(`page-as-you:${id}`, 5 * 60e3, () =>
+      pageInfoAsYou(id).catch((caught) => {
+        if (!exports.configured()) throw caught;
+        warn(`notion: ${caught.message}; trying the connection`);
+        return pageInfoViaConnection(id);
+      }),
+    );
+  }
+  exports.pageInfo = pageInfo;
+
+  function pageInfoViaConnection(id) {
     return cached(`page:${id}`, 5 * 60e3, async () => {
       const found = await object(id);
       const pathTitles = [];
@@ -125,7 +138,6 @@
       };
     });
   }
-  exports.pageInfo = pageInfo;
 
   // --- Writing pages ---------------------------------------------------------------------------------------
   const text = (content) => {
@@ -195,15 +207,14 @@
   const OAUTH_PORT = 47821;
   exports.redirectUri = `http://localhost:${OAUTH_PORT}/notion/callback`;
 
-  /** Signs in through Notion in the browser (you pick the pages to share there) -> { token, refreshToken, workspace }. */
-  async function signIn({ clientId, clientSecret }) {
-    const state = crypto.randomBytes(16).toString("hex");
+  /** Opens Notion's sign-in in the browser and waits for its answer on localhost:<OAUTH_PORT><path> -> the code. */
+  async function browserCode(path, authorize, state) {
     const servers = [];
-    const code = await new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("Notion: no answer from the browser within 5 minutes")), 5 * 60e3);
       const handle = (request, response) => {
         const url = new URL(request.url, exports.redirectUri);
-        if (url.pathname !== "/notion/callback") return response.writeHead(404).end();
+        if (url.pathname !== path) return response.writeHead(404).end();
         const ok = url.searchParams.get("state") === state && url.searchParams.get("code");
         response.writeHead(ok ? 200 : 400, { "content-type": "text/html; charset=utf-8" });
         response.end(ok ? "<p>Notion is connected to Slack Powertoys. You can close this tab.</p>" : `<p>Not connected: ${url.searchParams.get("error") ?? "unexpected answer"}.</p>`);
@@ -219,10 +230,16 @@
         server.listen(OAUTH_PORT, host);
         servers.push(server);
       }
-      const authorize = new URL("https://api.notion.com/v1/oauth/authorize");
-      for (const [key, value] of Object.entries({ client_id: clientId, response_type: "code", owner: "user", redirect_uri: exports.redirectUri, state })) authorize.searchParams.set(key, value);
       electron.shell.openExternal(authorize.toString());
     }).finally(() => servers.forEach((server) => server.close()));
+  }
+
+  /** Signs in through Notion in the browser (you pick the pages to share there) -> { token, refreshToken, workspace }. */
+  async function signIn({ clientId, clientSecret }) {
+    const state = crypto.randomBytes(16).toString("hex");
+    const authorize = new URL("https://api.notion.com/v1/oauth/authorize");
+    for (const [key, value] of Object.entries({ client_id: clientId, response_type: "code", owner: "user", redirect_uri: exports.redirectUri, state })) authorize.searchParams.set(key, value);
+    const code = await browserCode("/notion/callback", authorize, state);
     const response = await fetch(`${API}/oauth/token`, {
       method: "POST",
       headers: { authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`, "content-type": "application/json" },
@@ -234,6 +251,163 @@
     return { token: json.access_token, refreshToken: json.refresh_token ?? null, workspace: json.workspace_name ?? null };
   }
   exports.signIn = signIn;
+
+  // --- Notion's MCP server, signed in as you ---------------------------------------------------------------
+  // Notion's own MCP server (the one Claude's Notion connector uses) acts as you: it reads what you can read, teamspace
+  // pages included, where a connection sees only the pages someone connected it to. Link titles and previews use it
+  // when you have signed in ("Sign in as you" in the panel's Settings tab). Settings: notion.mcp { clientId, token,
+  // refreshToken, expiresAt }; the client is registered with Notion at sign-in (OAuth dynamic registration, PKCE).
+  const MCP = "https://mcp.notion.com";
+  const MCP_PATH = "/notion/mcp-callback";
+  const mcpRedirect = `http://localhost:${OAUTH_PORT}${MCP_PATH}`;
+  const mcpSettings = () => settings().mcp ?? {};
+  const mcpSignedIn = () => Boolean(mcpSettings().refreshToken || mcpSettings().token);
+  exports.mcpSignedIn = mcpSignedIn;
+  /** Whether link titles and previews can be read: as you (MCP) or through the connection. */
+  exports.canRead = () => mcpSignedIn() || exports.configured();
+
+  const base64url = (buffer) => buffer.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+  async function mcpToken(form) {
+    const response = await fetch(`${MCP}/token`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(form).toString() });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(`Notion (as you): ${json.error_description ?? json.error ?? response.status}`);
+    return json;
+  }
+
+  function saveMcp(clientId, json, previous = {}) {
+    const mcp = {
+      clientId,
+      token: json.access_token,
+      refreshToken: json.refresh_token ?? previous.refreshToken ?? null,
+      expiresAt: json.expires_in ? Date.now() + json.expires_in * 1000 : null,
+    };
+    updateSettings((current) => ({ ...current, notion: { ...current.notion, mcp } }));
+    return mcp;
+  }
+
+  /** Signs in to Notion's MCP server as you, in the browser -> { name } (who Notion says you are). */
+  async function signInAsYou() {
+    const registered = await fetch(`${MCP}/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ client_name: "Slack Powertoys", redirect_uris: [mcpRedirect], grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], token_endpoint_auth_method: "none" }),
+    }).then((response) => response.json());
+    if (!registered.client_id) throw new Error(`Notion (as you): couldn't register (${registered.error_description ?? registered.error ?? "no client id"})`);
+    const verifier = base64url(crypto.randomBytes(32));
+    const state = crypto.randomBytes(16).toString("hex");
+    const authorize = new URL(`${MCP}/authorize`);
+    for (const [key, value] of Object.entries({
+      response_type: "code",
+      client_id: registered.client_id,
+      redirect_uri: mcpRedirect,
+      code_challenge: base64url(crypto.createHash("sha256").update(verifier).digest()),
+      code_challenge_method: "S256",
+      state,
+      resource: `${MCP}/mcp`,
+    }))
+      authorize.searchParams.set(key, value);
+    const code = await browserCode(MCP_PATH, authorize, state);
+    const json = await mcpToken({ grant_type: "authorization_code", code, redirect_uri: mcpRedirect, client_id: registered.client_id, code_verifier: verifier, resource: `${MCP}/mcp` });
+    saveMcp(registered.client_id, json);
+    mcpSession = null;
+    const me = await mcpTool("notion-get-self", {}).catch(() => null);
+    log(`notion: signed in as you through Notion's MCP server${json.expires_in ? ` (token for ${json.expires_in}s, refreshed as needed)` : ""}`);
+    return { name: me?.name ?? me?.user?.name ?? null };
+  }
+  exports.signInAsYou = signInAsYou;
+
+  // One refresh at a time; a token is refreshed a minute before it expires.
+  let refreshing = null;
+  async function mcpAccessToken(force = false) {
+    const mcp = mcpSettings();
+    if (!force && mcp.token && (!mcp.expiresAt || mcp.expiresAt - Date.now() > 60e3)) return mcp.token;
+    if (!mcp.refreshToken) throw new Error("Notion (as you): signed out; sign in again in the panel's Settings tab");
+    refreshing ??= mcpToken({ grant_type: "refresh_token", refresh_token: mcp.refreshToken, client_id: mcp.clientId, resource: `${MCP}/mcp` })
+      .then((json) => saveMcp(mcp.clientId, json, mcp).token)
+      .finally(() => (refreshing = null));
+    return refreshing;
+  }
+
+  /** A JSON-RPC message to the MCP server; its answer from JSON or from a server-sent event stream. */
+  async function mcpPost(message, sessionId, token) {
+    const response = await fetch(`${MCP}/mcp`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        ...(sessionId ? { "mcp-session-id": sessionId, "mcp-protocol-version": "2025-06-18" } : {}),
+      },
+      body: JSON.stringify(message),
+    });
+    if (!response.ok) throw Object.assign(new Error(`Notion (as you): ${response.status} ${(await response.text()).slice(0, 200)}`), { status: response.status });
+    const text = await response.text();
+    if (message.id === undefined) return { response };
+    const answers = (response.headers.get("content-type") ?? "").includes("text/event-stream")
+      ? text.split("\n").filter((line) => line.startsWith("data:")).map((line) => JSON.parse(line.slice(5)))
+      : [JSON.parse(text)];
+    const answer = answers.find((each) => each.id === message.id);
+    if (!answer) throw new Error("Notion (as you): no answer");
+    if (answer.error) throw new Error(`Notion (as you): ${answer.error.message}`);
+    return { response, result: answer.result };
+  }
+
+  let mcpSession = null;
+  let rpcId = 0;
+  async function mcpTool(name, args) {
+    const attempt = async (token) => {
+      mcpSession ??= (async () => {
+        const { response } = await mcpPost({ jsonrpc: "2.0", id: ++rpcId, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "slack-powertoys", version: "1" } } }, null, token);
+        const sessionId = response.headers.get("mcp-session-id");
+        await mcpPost({ jsonrpc: "2.0", method: "notifications/initialized" }, sessionId, token);
+        return sessionId;
+      })().catch((caught) => ((mcpSession = null), Promise.reject(caught)));
+      const { result } = await mcpPost({ jsonrpc: "2.0", id: ++rpcId, method: "tools/call", params: { name, arguments: args } }, await mcpSession, token);
+      const text = (result.content ?? []).filter((part) => part.type === "text").map((part) => part.text).join("\n");
+      if (result.isError) throw new Error(`Notion (as you): ${text.slice(0, 300)}`);
+      try {
+        return JSON.parse(text);
+      } catch {
+        return { text };
+      }
+    };
+    try {
+      return await attempt(await mcpAccessToken());
+    } catch (caught) {
+      // The MCP spec: 404 means the session ended (start a new one); 401, the token was refused (refresh it).
+      if (caught.status !== 404 && caught.status !== 401) throw caught;
+      mcpSession = null;
+      return attempt(await mcpAccessToken(caught.status === 401));
+    }
+  }
+
+  /** pageInfo's answer, from notion-fetch: its properties (JSON) and content (Notion's Markdown) are in its text. */
+  async function pageInfoAsYou(id) {
+    const fetched = await mcpTool("notion-fetch", { id });
+    const text = fetched.text ?? "";
+    let properties = {};
+    try {
+      properties = JSON.parse(/<properties>\s*([\s\S]*?)\s*<\/properties>/.exec(text)?.[1] ?? "{}");
+    } catch {}
+    const ticketId = [properties["userDefined:ID"], properties.ID].find((value) => typeof value === "string" && /^[A-Za-z][\w]*-\d+$/.test(value)) ?? null;
+    const statusKey = Object.keys(properties).find((key) => /^(status|state|stage)$/i.test(key));
+    const content = /<content>([\s\S]*?)<\/content>/.exec(text)?.[1] ?? "";
+    return {
+      id,
+      url: fetched.url ?? null,
+      title: fetched.title || "Untitled",
+      ticketId,
+      icon: typeof fetched.icon === "string" && !/^http/.test(fetched.icon) ? fetched.icon : null,
+      path: fetched.path ? String(fetched.path).split(" / ").filter(Boolean) : [],
+      editedAt: fetched.page_last_edited_at ?? null,
+      editedBy: null,
+      status: typeof properties[statusKey] === "string" ? properties[statusKey] : null,
+      assignees: [],
+      excerpt: content.replace(/<[^>]+>/g, "").split("\n").map((line) => line.trim()).filter(Boolean).join("\n").slice(0, 420),
+      kind: fetched.metadata?.type === "database" ? "database" : /<parent-data-source\b/.test(text) ? "row" : "page",
+    };
+  }
 
   /** Pages and databases whose title matches -> [{ title, url, icon, editedAt }]. */
   async function search(query, limit = 10) {

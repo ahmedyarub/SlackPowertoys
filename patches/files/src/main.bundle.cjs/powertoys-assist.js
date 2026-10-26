@@ -72,7 +72,7 @@
 
   // --- Notion ----------------------------------------------------------------------------------------------
   async function notionPreview(url) {
-    if (!notion.configured() || notion.settings().previews === false) return { setup: !notion.configured() };
+    if (!notion.canRead() || notion.settings().previews === false) return { setup: !notion.canRead() };
     return notion.pageInfo(url);
   }
 
@@ -527,6 +527,7 @@
     "fill-snippet": fillSnippet,
     "notion-setup": notionSetup,
     "notion-sign-in": notionSignIn,
+    "notion-sign-in-as-you": () => notion.signInAsYou(),
     "review-prompt": ({ prompt }) => {
       const value = String(prompt ?? "").trim();
       updateSettings((current) => ({ ...current, dev: { ...current.dev, reviewPrompt: value && value !== REVIEW_PROMPT ? value : undefined } }));
@@ -541,6 +542,7 @@
     },
     settings: () => ({
       notion: notion.configured(),
+      notionAsYou: notion.mcpSignedIn(),
       notionClientId: notion.settings().clientId || null,
       notionRedirectUri: notion.redirectUri,
       transcriptLanguage: claude.transcriptLanguage(),
