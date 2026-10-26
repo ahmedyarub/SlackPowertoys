@@ -121,11 +121,18 @@
     }
   }
 
-  /** A link's title: Notion (API), GitHub (gh), else the page's own title. */
+  /**
+   * A link's title: Notion (API; "ISS-1995 Title" for a ticket), GitHub (gh), else the page's own title. A Notion link
+   * the API can't read gets none: the page's own title is just "Notion".
+   */
   function linkTitle(url) {
     return cached(`title:${url}`, 10 * 60e3, async () => {
       const notion = __webpack_require__("powertoys/notion");
-      if (notion.isNotionLink(url) && notion.configured()) return (await notion.pageInfo(url)).title;
+      if (notion.isNotionLink(url)) {
+        if (!notion.configured()) return null;
+        const info = await notion.pageInfo(url);
+        return info.ticketId ? `${info.ticketId} ${info.title}` : info.title;
+      }
       const ref = parseGitHub(url);
       if (ref && ref.kind !== "run") {
         const info = await githubInfo(url);

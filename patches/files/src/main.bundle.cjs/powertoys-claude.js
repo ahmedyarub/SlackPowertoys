@@ -812,8 +812,8 @@
     electron.app.on("will-quit", () => fs.rmSync(file, { force: true }));
   }
 
-  // For powertoys/assist.
-  Object.assign(exports, { settings, requirePage, readThread, unreads, search, myMessages, createDraft, huddleTranscript, clipTranscripts, saveFile, TRANSCRIPT_LANGUAGES, transcriptLanguage, requestTranscript, teamForFolder, remind, self, conversationName, userName, parseRef, permalink });
+  // For powertoys/assist and powertoys/history.
+  Object.assign(exports, { settings, requirePage, readThread, unreads, search, myMessages, createDraft, huddleTranscript, clipTranscripts, saveFile, TRANSCRIPT_LANGUAGES, transcriptLanguage, requestTranscript, teamForFolder, remind, self, conversationName, userName, plainText, parseRef, permalink });
 
   exports.start = function start() {
     if (readSettings().bridge) startBridge();

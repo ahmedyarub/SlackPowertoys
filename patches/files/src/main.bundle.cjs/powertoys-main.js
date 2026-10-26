@@ -230,6 +230,7 @@
     __webpack_require__("powertoys/claude").start();
     __webpack_require__("powertoys/assist").start(store);
     __webpack_require__("powertoys/huddle").start();
+    __webpack_require__("powertoys/history").start();
     electron.app.on("web-contents-created", (event, webContents) => {
       webContents.on("did-finish-load", () => applyMods(webContents));
     });

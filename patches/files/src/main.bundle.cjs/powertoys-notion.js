@@ -38,7 +38,8 @@
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
   }
   exports.notionId = notionId;
-  exports.isNotionLink = (url) => /^https:\/\/([\w-]+\.)?notion\.(so|site)\//.test(url);
+  // notion.so, notion.site (published pages) and notion.com (app.notion.com: Notion's current links).
+  exports.isNotionLink = (url) => /^https:\/\/([\w-]+\.)?notion\.(so|site|com)\//.test(url);
 
   const plain = (richText = []) => richText.map((part) => part.plain_text ?? "").join("");
   const titleOf = (object) => {
@@ -87,7 +88,7 @@
   }
 
   /**
-   * What a link preview shows: { id, url, title, icon, path: [parent titles], editedAt, editedBy, status, assignees,
+   * What a link preview shows: { id, url, title, ticketId (a database's own ID, like ISS-1995, or null), icon, path: [parent titles], editedAt, editedBy, status, assignees,
    * excerpt, kind: "page" | "database" | "row" }.
    */
   function pageInfo(ref) {
@@ -106,11 +107,13 @@
       }
       const properties = Object.entries(found.properties ?? {});
       const status = properties.find(([, p]) => p.type === "status")?.[1]?.status?.name ?? properties.find(([name, p]) => p.type === "select" && /status|state|stage/i.test(name))?.[1]?.select?.name ?? null;
+      const unique = properties.find(([, p]) => p.type === "unique_id")?.[1]?.unique_id;
       const people = properties.find(([name, p]) => p.type === "people" && /assign|owner|lead|dri/i.test(name)) ?? properties.find(([, p]) => p.type === "people");
       return {
         id,
         url: found.url,
         title: titleOf(found),
+        ticketId: unique?.number != null ? `${unique.prefix ? `${unique.prefix}-` : ""}${unique.number}` : null,
         icon: iconOf(found),
         path: pathTitles,
         editedAt: found.last_edited_time ?? null,

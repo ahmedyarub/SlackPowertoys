@@ -7,6 +7,7 @@
 //   Focus    do not disturb for a while; Claude lets urgent mentions through; a summary when it ends
 //   Digest   what is unread, summarized by Claude
 //   Recordings  the huddles recorded: open, transcribe (Slack), summarize (Claude), delete
+//   History  copies of edited and deleted messages (powertoys/page-history), newest first
 //   Settings the transcription language; Notion: sign in (OAuth connection) or an internal integration's secret
 // Also: a Claude Code session's permission request (with "agents.remoteApprove" on) shows as Allow / Deny here.
 // ---------------------------------------------------------------------------------------------
@@ -62,7 +63,7 @@
     const root = page.ui();
     panel = el("div", "panel");
     const head = el("div", "panel-head");
-    for (const [name, label] of [["agents", "Agents"], ["search", "Search"], ["focus", "Focus"], ["digest", "Digest"], ["recordings", "Recordings"], ["settings", "Settings"]]) {
+    for (const [name, label] of [["agents", "Agents"], ["search", "Search"], ["focus", "Focus"], ["digest", "Digest"], ["recordings", "Recordings"], ["history", "History"], ["settings", "Settings"]]) {
       const button = el("button", `tab${tab === name ? " on" : ""}`, label);
       button.addEventListener("click", () => ((tab = name), toggle(true)));
       head.append(button);
@@ -73,7 +74,7 @@
     const body = el("div", "panel-body");
     panel.append(head, body);
     root.appendChild(panel);
-    ({ agents: renderAgents, search: renderSearch, focus: renderFocus, digest: renderDigest, recordings: renderRecordings, settings: renderSettings })[tab](body);
+    ({ agents: renderAgents, search: renderSearch, focus: renderFocus, digest: renderDigest, recordings: renderRecordings, history: renderHistory, settings: renderSettings })[tab](body);
   }
 
   function renderAgents(body) {
@@ -179,6 +180,31 @@
   }
 
   /** The recorded huddles, newest first, each with what can be done with it. */
+  async function renderHistory(body) {
+    let list;
+    try {
+      list = await page.invoke("history-list", { limit: 200 });
+    } catch (caught) {
+      return body.append(el("div", "sub", `Couldn't read the copies: ${page.reason(caught)}`));
+    }
+    if (!list.length) return body.append(el("div", "sub", "No edited or deleted messages yet. Each one seen from now on keeps a copy here."));
+    for (const copy of list) {
+      const row = el("div", "row");
+      row.append(
+        el("div", "", `${copy.kind === "deleted" ? "Deleted" : "Edited"} · ${copy.where ?? copy.channel}${copy.who ? ` · ${copy.who}` : ""}`),
+        el("div", "sub", new Date(copy.at).toLocaleString()),
+      );
+      if (copy.kind === "edited") row.append(el("div", "sub", "Before:"), el("pre", "", copy.text), el("div", "sub", "After:"), el("pre", "", copy.after ?? ""));
+      else row.append(el("pre", "", copy.text));
+      if (copy.kind === "edited" && copy.link) {
+        const open = el("span", "link", "Open in Slack");
+        open.addEventListener("click", () => openLink(copy.link));
+        row.append(open);
+      }
+      body.append(row);
+    }
+  }
+
   async function renderRecordings(body) {
     let list;
     try {

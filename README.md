@@ -84,7 +84,8 @@ patches/files/...           files that are entirely new (written for Powertoys),
   half second, kept in memory too, restarted in a new part if the recorder fails, finished before Slack quits and
   recovered after a crash. When the huddle ends: **Transcribe** (Slack's own transcription, via a private upload,
   saved beside the video and added to it as a subtitle track),
-  **Summarize** (Claude), **Save** or **Delete** (Recycle Bin); also in the panel's Recordings tab.
+  **Summarize** (Claude) and **Keep** as checkboxes, or delete it (Recycle Bin, after a Yes/No); also in the panel's
+  Recordings tab.
   `"huddle": {"autoRecord": false}` turns it off. You are responsible for telling the people on the call.
 - **Transcription language:** a dropdown in the panel's Settings tab (English by default) for every transcript.
 - **Claude Code tells you in Slack** when a long session finishes or a session needs you: add
@@ -96,8 +97,10 @@ patches/files/...           files that are entirely new (written for Powertoys),
 - **Developer features** (they use Claude through the Claude Code CLI, signed in as you, with a lean prompt; Notion
   through the Powertoys panel's Settings tab (Ctrl+Alt+P): sign in with an OAuth connection whose redirect URI is
   `http://localhost:47821/notion/callback`, or paste an internal integration's secret; GitHub through the `gh` CLI):
-  - **Notion:** link previews (title, path, status, assignees, last edit, first lines); a pasted link goes in
-    at once, and its title, linked, replaces it once known (Notion, GitHub, or any page's title); **Save to Notion** in the message menu (a thread, huddle or
+  - **Notion:** link previews (title, path, status, assignees, last edit, first lines; notion.so, notion.site and
+    app.notion.com links); a pasted link goes in at once, and its title, linked, replaces it once known (a Notion
+    ticket as "ISS-1995 Title", with its database's ID; a GitHub title; or any page's title). A Notion page not shared
+    with your connection keeps its link and a notice says why. **Save to Notion** in the message menu (a thread, huddle or
     clip, summarized with decisions and action items); **Draft a postmortem in Notion** in incident channels. Claude
     picks where each new page goes (an Incidents database for a postmortem, say) among the pages you shared.
   - **Claude in Slack:** a catch-up digest (tray, panel, or daily); **Explain** for selected text; **Draft a reply with
@@ -115,6 +118,11 @@ patches/files/...           files that are entirely new (written for Powertoys),
     across Slack, Notion and your repositories, a **secret guard** before sending (API keys, tokens, private keys,
     `.env` lines; checked on your computer), and **snippets** (type `;;`, with `{{commits}}`, `{{date}}`,
     `{{ai: ...}}`).
+- **Edited and deleted messages keep a copy:** a deleted message stays where it was, dimmed and marked "Deleted" (until
+  Slack reloads that conversation); an edited message gets "earlier version" next to Slack's "(edited)". Every copy is
+  saved to `%APPDATA%\Slack\powertoys\history\messages.jsonl` before the message is marked, and listed in the panel's
+  History tab. Only what your Slack sees while it runs is kept.
+- **Louder videos:** pointing at a video shows a "Louder" slider, 100% to 300%, on top of Slack's own volume.
 - **Auto-start for a copy run from its own folder:** with no Squirrel launcher (`slack.exe`) one folder up, "Launch
   on login" registers the running executable itself.
 - **Mods:** CSS and JavaScript files in `%APPDATA%\Slack\powertoys\mods\` are inserted into, and run in, Slack's

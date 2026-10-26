@@ -31,7 +31,7 @@
       border: 0; border-radius: 4px; padding: 3px 9px; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,.3); }`;
 
   const FILE_REF = /(?:[A-Za-z]:)?(?:[\w@.-]+[\\/])*[\w@.-]+\.(?:js|jsx|ts|tsx|mjs|cjs|py|go|rs|java|kt|rb|php|cs|cpp|cc|c|h|hpp|swift|scala|ex|exs|vue|svelte|sql|sh|yml|yaml|json)(?::(\d+))(?::(\d+))?/g;
-  const NOTION = /^https:\/\/([\w-]+\.)?notion\.(so|site)\//;
+  const NOTION = /^https:\/\/([\w-]+\.)?notion\.(so|site|com)\//;
   const GITHUB = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(pull|issues|actions\/runs)\/\d+/;
 
   let page;
@@ -154,7 +154,7 @@
     const info = await page.invoke("notion-preview", url).catch(() => null);
     if (!info || info.setup || !info.title) return null;
     const card = el("div", "powertoys-card");
-    card.append(el("div", "pt-title", `${info.icon && !/^http/.test(info.icon) ? `${info.icon} ` : ""}${info.title}`));
+    card.append(el("div", "pt-title", `${info.icon && !/^http/.test(info.icon) ? `${info.icon} ` : ""}${info.ticketId ? `${info.ticketId} ` : ""}${info.title}`));
     const meta = [info.path.join(" / "), info.status && `Status: ${info.status}`, info.assignees.length && `Assignees: ${info.assignees.join(", ")}`, info.editedAt && `Edited ${timeAgo(info.editedAt)}${info.editedBy ? ` by ${info.editedBy}` : ""}`].filter(Boolean);
     if (meta.length) card.append(el("div", "pt-meta", meta.join(" · ")));
     if (info.excerpt) card.append(el("div", "pt-excerpt", info.excerpt));

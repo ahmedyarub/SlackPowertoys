@@ -49,6 +49,9 @@
       .notice button { font: inherit; font-weight: 700; color: #fff; background: #007a5a; border: 0; border-radius: 4px;
         padding: 4px 10px; cursor: pointer; }
       .notice button.close { background: transparent; color: #d1d2d3; font-weight: 400; padding: 0 4px; }
+      .notice label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; white-space: nowrap; }
+      .notice input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: #007a5a; cursor: pointer; }
+      .notice input:focus-visible, .notice button:focus-visible { outline: 2px solid #1d9bd1; outline-offset: 2px; }
     </style>`;
     // Slack sends keys typed outside a text field to the message box; from outside the shadow root our fields don't
     // look like text fields, so their keys stop here.
@@ -114,6 +117,67 @@
       { label: "Save", run: () => invoke("recording", { base, op: "save" }).then(() => notice("Recording saved.")) },
       { label: "Delete", run: () => invoke("recording", { base, op: "delete" }).then(() => notice("Recording moved to the Recycle Bin.")) },
     ];
+  }
+
+  /**
+   * When a huddle's recording ends: check-boxes for what to do with it (Keep, checked; Transcribe; Summarize, which
+   * transcribes first) and OK. Unticking Keep and pressing OK asks before the recording goes to the Recycle Bin;
+   * closing the prompt or leaving it keeps the recording.
+   */
+  function recordingPrompt({ base, parts, where, minutes, recovered }) {
+    const root = ui();
+    root.querySelector(".notice")?.remove();
+    const node = document.createElement("div");
+    node.className = "notice recording-prompt";
+    node.setAttribute("role", "dialog");
+    node.setAttribute("aria-label", "Huddle recording");
+    const title = `${recovered ? "Recovered an unfinished recording of" : "Recorded"} the huddle${where ? ` in ${where}` : ""}${recovered ? "" : ` (${minutes} min)`}${parts > 1 ? `, in ${parts} parts` : ""}.`;
+    const check = (label, checked) => {
+      const input = Object.assign(document.createElement("input"), { type: "checkbox", checked });
+      const wrap = document.createElement("label");
+      wrap.append(input, label);
+      return { wrap, input };
+    };
+    const button = (label, run, className = "") => {
+      const node2 = Object.assign(document.createElement("button"), { textContent: label, className });
+      node2.addEventListener("click", run);
+      return node2;
+    };
+    const keep = check("Keep the recording", true);
+    const transcribe = check("Transcribe", false);
+    const summarize = check("Summarize", false);
+    // Summarize needs the transcript, and both need the recording kept.
+    summarize.input.addEventListener("change", () => summarize.input.checked && ((transcribe.input.checked = true), (keep.input.checked = true)));
+    transcribe.input.addEventListener("change", () => (transcribe.input.checked ? (keep.input.checked = true) : (summarize.input.checked = false)));
+    keep.input.addEventListener("change", () => keep.input.checked || ((transcribe.input.checked = false), (summarize.input.checked = false)));
+    const close = button("×", () => node.remove(), "close");
+    close.title = "Close (the recording is kept)";
+    const choices = () => {
+      node.replaceChildren(title, keep.wrap, transcribe.wrap, summarize.wrap, button("OK", apply), close);
+      keep.input.focus();
+    };
+    const apply = () => {
+      if (!keep.input.checked) {
+        node.replaceChildren(
+          "Move the recording to the Recycle Bin?",
+          button("Yes", () => {
+            node.remove();
+            invoke("recording", { base, op: "delete" }).then(() => notice("Recording moved to the Recycle Bin."), (caught) => notice(`Couldn't delete it: ${reason(caught)}`));
+          }),
+          button("No", () => ((keep.input.checked = true), choices()), "close"),
+        );
+        return;
+      }
+      node.remove();
+      const actions = recordingActions(base);
+      const run = (label) => actions.find((action) => action.label === label).run();
+      invoke("recording", { base, op: "save" })
+        .then(() => (summarize.input.checked ? run("Summarize") : transcribe.input.checked ? run("Transcribe") : notice("Recording kept.")))
+        .catch((caught) => notice(`Couldn't keep it: ${reason(caught)}`));
+    };
+    choices();
+    root.appendChild(node);
+    setTimeout(() => node.remove(), 10 * 60000);
   }
 
   async function markAllRead(teamId, where) {
@@ -335,19 +399,18 @@
   Object.assign(exports, { ui, notice, popover, renderMarkdown, invoke, reason, recordingActions, workspaceOf, currentTeamId, log, on: (channel, fn) => electron.ipcRenderer.on(channel, (event, payload) => fn(payload)) });
 
   const PAGE_STYLE = ".powertoys-menu-item button:hover, .powertoys-menu-item button:focus { background: #1264a3; color: #fff; }";
-  const PAGE_MODULES = ["powertoys/page-dev", "powertoys/page-compose", "powertoys/page-panel"];
+  const PAGE_MODULES = ["powertoys/page-dev", "powertoys/page-compose", "powertoys/page-panel", "powertoys/page-history", "powertoys/page-media"];
 
   exports.start = function start(store) {
+    // Before Slack's own scripts run: copies of edited and deleted messages (powertoys/page-history).
+    try {
+      __webpack_require__("powertoys/page-history").hookSocket();
+    } catch (caught) {
+      log(`powertoys/page-history did not hook Slack's connection: ${caught.message}`);
+    }
     electron.ipcRenderer.on("powertoys:notice", (event, { text }) => notice(text));
     // A huddle's recording, when the huddle ends: keep it (and show it) or delete it; kept unless you say otherwise.
-    electron.ipcRenderer.on("powertoys:recording-done", (event, { base, parts, where, minutes, recovered }) =>
-      notice(
-        `${recovered ? "Recovered an unfinished recording of" : "Recorded"} the huddle${where ? ` in ${where}` : ""}` +
-          `${recovered ? "" : ` (${minutes} min)`}${parts > 1 ? `, in ${parts} parts` : ""}.`,
-        recordingActions(base),
-        10 * 60000,
-      ),
-    );
+    electron.ipcRenderer.on("powertoys:recording-done", (event, recording) => recordingPrompt(recording));
     electron.ipcRenderer.on("powertoys:huddle-ended", (event, { teamId, link, where }) =>
       notice(`A huddle in ${where} ended with a transcript.`, { label: "Summarize with Claude", run: () => askClaude({ link, teamId, kind: "huddle" }) }),
     );

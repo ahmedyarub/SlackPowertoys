@@ -28,7 +28,10 @@
     let title = null;
     try {
       title = await Promise.race([page.invoke("link-title", text), new Promise((resolve) => setTimeout(() => resolve(null), 4000))]);
-    } catch {}
+    } catch (caught) {
+      // Most often a page the Notion connection wasn't given: say so rather than leave the link unexplained.
+      if (/^Notion\b/.test(page.reason(caught))) page.notice(`No title for this link. ${page.reason(caught)}`);
+    }
     if (title) titleLink(editor, text, title);
   }
 
