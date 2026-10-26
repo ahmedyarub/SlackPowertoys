@@ -591,7 +591,7 @@
     "fill-snippet": fillSnippet,
     "notion-setup": notionSetup,
     "notion-sign-in": notionSignIn,
-    "notion-sign-in-as-you": () => notion.signInAsYou(),
+    "notion-sign-in-as-you": () => notion.signInAsYou().catch((caught) => (warn(`notion: sign-in as you failed: ${caught.message}`), Promise.reject(caught))),
     "review-prompt": ({ prompt }) => {
       const value = String(prompt ?? "").trim();
       updateSettings((current) => ({ ...current, dev: { ...current.dev, reviewPrompt: value && value !== REVIEW_PROMPT ? value : undefined } }));

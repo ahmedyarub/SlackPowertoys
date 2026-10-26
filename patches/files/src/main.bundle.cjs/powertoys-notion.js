@@ -307,7 +307,9 @@
       resource: `${MCP}/mcp`,
     }))
       authorize.searchParams.set(key, value);
+    log("notion: sign-in as you: client registered, waiting for the browser");
     const code = await browserCode(MCP_PATH, authorize, state);
+    log("notion: sign-in as you: the browser answered; getting the token");
     const json = await mcpToken({ grant_type: "authorization_code", code, redirect_uri: mcpRedirect, client_id: registered.client_id, code_verifier: verifier, resource: `${MCP}/mcp` });
     saveMcp(registered.client_id, json);
     mcpSession = null;

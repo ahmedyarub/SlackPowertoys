@@ -222,7 +222,7 @@
   {
    "path": "src/main.bundle.cjs/powertoys-assist.js",
    "kind": "add",
-   "sha256": "208d0a49ebc8d6452164006fd8dc40a226bee27b623b8a639921dd06a37999f5"
+   "sha256": "a8c230b937cf3b56c8dad4e47ce478d4ba643a31e2dc6620d70c82be6075ff7c"
   },
   {
    "path": "src/main.bundle.cjs/powertoys-brief.js",
@@ -257,7 +257,7 @@
   {
    "path": "src/main.bundle.cjs/powertoys-notion.js",
    "kind": "add",
-   "sha256": "357f30f2d79c4360dea991553d5650627d596f6c068e85582acecdb58edecf34"
+   "sha256": "d9e89038b4ed91130558f6ff4e32ba179dae82a3525349b0f4f2f84c18ef7203"
   },
   {
    "path": "src/main.bundle.cjs/powertoys-tickets.js",
