@@ -7,6 +7,7 @@
 //   settings.json  Powertoys' settings (missing keys take the defaults below)
 //   mods\          *.css inserted into, and *.js run in, every Slack page (app.slack.com) when it loads
 //   bridge.json    while Slack runs: the port and token of the bridge to Claude (powertoys-claude.js)
+//   run.json       this run: started, last seen alive, memory then, and how it ended (see "How the previous run ended")
 // Logs go to Slack's own log (logs\default\browser.log) with a "[powertoys]" prefix.
 // ---------------------------------------------------------------------------------------------
 (function (module, exports, __webpack_require__) {
@@ -183,6 +184,7 @@
     const report = (how, stack) => {
       if (reported) return;
       reported = true;
+      endRun(how);
       log(`quitting (${how}); recent: ${recent.join(" · ") || "nothing"}${stack ? `; sent from: ${stack}` : ""}`);
     };
     const stackOf = () =>
@@ -215,14 +217,116 @@
     // (Before Slack's own before-quit listener, which sends QUIT_APP at once.)
     electron.app.prependListener("before-quit", () => remember("before-quit"));
     electron.app.on("will-quit", () => report("will-quit"));
-    electron.powerMonitor.on("shutdown", () => remember("Windows shutting down"));
-    electron.app.on("session-end", () => remember("Windows ending the session"));
+    electron.powerMonitor.on("shutdown", () => (remember("Windows shutting down"), endRun("Windows shutting down")));
+    electron.app.on("session-end", () => (remember("Windows ending the session"), endRun("Windows ending the session")));
+    electron.powerMonitor.on("suspend", () => (remember("Windows going to sleep"), seen("asleep")));
+    electron.powerMonitor.on("resume", () => remember("Windows woke up"));
     electron.app.on("query-session-end", (event) => remember(`Windows asking to end the session (${event.reasons?.join(", ") ?? ""})`));
     process.on("exit", (code) => report(`process exit ${code}`));
   }
 
+  // --- How the previous run ended, and memory -----------------------------------------------------------------
+  // run.json holds this run: when it started, when it was last seen alive (every 30 s) with Windows' memory then, and
+  // how it ended if it quit. On start, one log line says how the previous run ended. A run with no ending was ended
+  // from outside (killed, out of memory, the power going), so the line adds Windows' own events from its last minutes:
+  // low memory, programs crashing, shutdowns. While Slack runs, a log line when Windows' free commit memory (what
+  // programs can still reserve: RAM plus the page file; when it runs out, allocations fail and Slack dies at once) runs
+  // low, with Slack's own share.
+  const runFile = () => path.join(powertoysDir(), "run.json");
+  const GB = 1024 * 1024; // getSystemMemoryInfo and getAppMetrics count in KB
+  let run = null;
+
+  function memory() {
+    const system = process.getSystemMemoryInfo();
+    const slack = electron.app.getAppMetrics().reduce((sum, each) => sum + (each.memory?.privateBytes ?? each.memory?.workingSetSize ?? 0), 0);
+    return { commitFree: system.swapFree / GB, commitLimit: system.swapTotal / GB, ramFree: system.free / GB, ram: system.total / GB, slack: slack / GB };
+  }
+  const describe = (m) =>
+    `commit ${m.commitFree.toFixed(1)} of ${m.commitLimit.toFixed(1)} GB free, RAM ${m.ramFree.toFixed(1)} of ${m.ram.toFixed(1)} GB free, Slack ${m.slack.toFixed(2)} GB`;
+  const stamp = (time) => new Date(time - new Date(time).getTimezoneOffset() * 60000).toISOString().replace("T", " ").slice(0, 19);
+
+  function writeRun() {
+    try {
+      fs.writeFileSync(runFile(), JSON.stringify(run));
+    } catch (caught) {
+      warn(`run.json could not be written: ${caught.message}`);
+    }
+  }
+  function seen(state = "running") {
+    let m = null;
+    try {
+      m = memory();
+    } catch {}
+    Object.assign(run, { lastSeen: Date.now(), state, memory: m });
+    writeRun();
+    return m;
+  }
+  function endRun(how) {
+    if (!run || run.ended) return;
+    run.ended = { how, at: Date.now() };
+    seen("ended");
+  }
+
+  /** Windows' events from `from` to now that can end a program from outside, as short lines. */
+  function windowsEvents(from) {
+    const start = new Date(from).toISOString();
+    const script =
+      `$from = [datetime]'${start}'; ` +
+      "$events = @(Get-WinEvent -FilterHashtable @{LogName='System'; Id=2004,1074,6006,6008,41,42; StartTime=$from} -ErrorAction SilentlyContinue) + " +
+      "@(Get-WinEvent -FilterHashtable @{LogName='Application'; Id=1000,1002; StartTime=$from} -ErrorAction SilentlyContinue); " +
+      "$events | Sort-Object TimeCreated | Select-Object -First 10 | ForEach-Object { $t = ($_.Message -replace '\\s+', ' '); " +
+      "if ($_.Id -eq 1000) { $t = $t -replace '^Faulting application name: ([^,]+),.*?Exception code: (0x[0-9a-fA-F]+).*$', '$1 crashed ($2)' }; " +
+      "'{0:HH:mm:ss} {1} {2}: {3}' -f $_.TimeCreated, $_.ProviderName, $_.Id, $t.Substring(0, [Math]::Min(260, $t.Length)) }";
+    return new Promise((resolve) =>
+      __webpack_require__(35317).execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { windowsHide: true, timeout: 60000 }, (caught, stdout) =>
+        resolve(caught && !stdout ? [`(Windows' events could not be read: ${caught.message})`] : String(stdout).trim().split(/\r?\n/).filter(Boolean)),
+      ),
+    );
+  }
+
+  function reportPreviousRun(previous) {
+    if (!previous?.startedAt) return log("previous run: none recorded");
+    const ran = `started ${stamp(previous.startedAt)}, last seen ${stamp(previous.lastSeen)}`;
+    const then = previous.memory ? `; memory then: ${describe(previous.memory)}` : "";
+    if (previous.ended) return log(`previous run (pid ${previous.pid}) quit at ${stamp(previous.ended.at)} (${previous.ended.how}); ${ran}${then}`);
+    // Killed, crashed or cut off: what Windows saw from shortly before it was last seen alive.
+    windowsEvents(previous.lastSeen - 2 * 60000).then((events) =>
+      warn(
+        `previous run (pid ${previous.pid}) ended without quitting (killed, crashed or out of memory)${previous.state === "asleep" ? " while Windows was asleep" : ""}; ` +
+          `${ran}${then}; Windows' events since: ${events.length ? events.join(" · ") : "none"}`,
+      ),
+    );
+  }
+
+  function watchRun() {
+    let previous = null;
+    try {
+      previous = JSON.parse(fs.readFileSync(runFile(), "utf8"));
+    } catch {}
+    run = { pid: process.pid, startedAt: Date.now() };
+    const m = seen();
+    log(`memory at start: ${m ? describe(m) : "unknown"}`);
+    reportPreviousRun(previous);
+    let low = false;
+    let lastLowLog = 0;
+    setInterval(() => {
+      const now = seen();
+      if (!now) return;
+      const share = now.commitFree / now.commitLimit;
+      if (share < 0.1 && Date.now() - lastLowLog > 2 * 60000) {
+        low = true;
+        lastLowLog = Date.now();
+        warn(`low memory: ${describe(now)}`);
+      } else if (low && share > 0.15) {
+        low = false;
+        log(`memory back: ${describe(now)}`);
+      }
+    }, 30000).unref();
+  }
+
   exports.start = function start(store) {
     fs.mkdirSync(path.join(powertoysDir(), "mods"), { recursive: true });
+    watchRun();
     watchQuit(store);
     // The page half's messages go to Slack's log.
     electron.ipcMain.on("powertoys:log", (event, message) => log(`[page] ${String(message).slice(0, 4000)}`));
