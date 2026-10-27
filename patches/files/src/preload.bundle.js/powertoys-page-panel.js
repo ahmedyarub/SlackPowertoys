@@ -435,6 +435,15 @@
       },
       true,
     );
+    // A press outside the panel closes it; a press on Powertoys' own layer (the panel, or a picker or notice it opened)
+    // doesn't. The press goes on to Slack as usual.
+    document.addEventListener(
+      "pointerdown",
+      (event) => {
+        if (panel && !event.composedPath().includes(page.ui())) toggle(false);
+      },
+      true,
+    );
     page.log("panel started");
   };
 });
