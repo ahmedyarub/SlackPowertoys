@@ -622,6 +622,11 @@
     "task-from-thread": taskFromThread,
     "issue-from-thread": issueFromThread,
     "share-clip": shareClip,
+    // A link in Powertoys' own Markdown (a brief, a summary): web pages, and Claude Desktop's links; nothing else.
+    "open-external": ({ url }) => {
+      if (!/^(https|claude):\/\//.test(String(url))) throw new Error("not a link Powertoys opens");
+      return electron.shell.openExternal(String(url)).then(() => ({ ok: true }));
+    },
     search: searchAll,
     focus: setFocus,
     snippets: () => snippets(),

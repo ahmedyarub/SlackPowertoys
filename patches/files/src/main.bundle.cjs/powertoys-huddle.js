@@ -112,6 +112,8 @@
       .answer .text .md-heading { font-weight: 700; margin: 8px 0 4px; }
       .answer .text ul, .answer .text ol { margin: 0 0 6px; padding-left: 20px; }
       .answer .text code { font-family: Consolas, monospace; background: rgba(255,255,255,.08); padding: 0 3px; border-radius: 3px; }
+      .answer .text a { color: #1d9bd1; text-decoration: none; cursor: pointer; }
+      .answer .text a:hover { text-decoration: underline; }
       .answer .type { margin: 6px 10px 10px; resize: vertical; font: inherit; font-size: 13px; color: #fff; background: #1a1d21;
         border: 1px solid rgba(255,255,255,.2); border-radius: 6px; padding: 6px 8px; }
       .answer .type:focus-visible, .bar button:focus-visible { outline: 2px solid #1d9bd1; outline-offset: 1px; }
@@ -123,8 +125,14 @@
     const markdown = (text) => {
       const fragment = document.createDocumentFragment();
       const inline = (parent, line) => {
-        for (const piece of line.split(/(\*\*[^*]+\*\*|`[^`]+`)/)) {
-          if (/^\*\*[^*]+\*\*$/.test(piece)) parent.append(el("strong", "", piece.slice(2, -2)));
+        for (const piece of line.split(/(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\((?:https|claude):\/\/[^)\s]+\))/)) {
+          const link = /^\[([^\]]+)\]\(((?:https|claude):\/\/[^)\s]+)\)$/.exec(piece);
+          if (link) {
+            // Opened by the main process (a ticket, a PR, a Claude Code session in Claude Desktop).
+            const anchor = Object.assign(el("a", "", link[1]), { href: link[2] });
+            anchor.addEventListener("click", (event) => (event.preventDefault(), send({ type: "open", url: link[2] })));
+            parent.append(anchor);
+          } else if (/^\*\*[^*]+\*\*$/.test(piece)) parent.append(el("strong", "", piece.slice(2, -2)));
           else if (/^`[^`]+`$/.test(piece)) parent.append(el("code", "", piece.slice(1, -1)));
           else if (piece) parent.append(piece);
         }
@@ -578,6 +586,9 @@
       log(`huddle: questions go to "${chosen?.title ?? "a new session"}"`);
     } else if (message.type === "log") {
       log(`huddle window: ${String(message.text).slice(0, 300)}`);
+    } else if (message.type === "open") {
+      // A link in the brief: a ticket or PR (the browser), a Claude Code session (Claude Desktop); nothing else.
+      if (/^(https|claude):\/\//.test(String(message.url))) electron.shell.openExternal(String(message.url));
     } else if (message.type === "caption") {
       // Appended as it comes (a crash keeps it); the last version of each line is the one used.
       const recording = recordings.get(contents.id);

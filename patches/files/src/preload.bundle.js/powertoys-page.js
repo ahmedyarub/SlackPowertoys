@@ -412,8 +412,14 @@
   function renderMarkdown(text) {
     const fragment = document.createDocumentFragment();
     const inline = (parent, line) => {
-      for (const piece of line.split(/(\*\*[^*]+\*\*|`[^`]+`)/)) {
-        if (/^\*\*[^*]+\*\*$/.test(piece)) parent.append(Object.assign(document.createElement("strong"), { textContent: piece.slice(2, -2) }));
+      for (const piece of line.split(/(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\((?:https|claude):\/\/[^)\s]+\))/)) {
+        const link = /^\[([^\]]+)\]\(((?:https|claude):\/\/[^)\s]+)\)$/.exec(piece);
+        if (link) {
+          // Opened by the main process: a ticket or PR in the browser, a Claude Code session in Claude Desktop.
+          const anchor = Object.assign(document.createElement("a"), { textContent: link[1], href: link[2], className: "md-link" });
+          anchor.addEventListener("click", (event) => (event.preventDefault(), invoke("open-external", { url: link[2] }).catch((caught) => notice(reason(caught)))));
+          parent.append(anchor);
+        } else if (/^\*\*[^*]+\*\*$/.test(piece)) parent.append(Object.assign(document.createElement("strong"), { textContent: piece.slice(2, -2) }));
         else if (/^`[^`]+`$/.test(piece)) parent.append(Object.assign(document.createElement("code"), { textContent: piece.slice(1, -1) }));
         else if (piece) parent.append(piece);
       }
@@ -497,6 +503,8 @@
       .popover-body p { margin: 0 0 6px; }
       .popover-body ul, .popover-body ol { margin: 0 0 8px; padding-left: 20px; }
       .popover-body code { font-family: Consolas, monospace; background: rgba(255,255,255,.08); padding: 0 3px; border-radius: 3px; }
+      .md-link { color: #1d9bd1; text-decoration: none; cursor: pointer; }
+      .md-link:hover { text-decoration: underline; }
       .popover-actions { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid rgba(255,255,255,.1); }
       .popover-actions button { font: inherit; font-weight: 700; color: #fff; background: #007a5a; border: 0; border-radius: 4px;
         padding: 5px 12px; cursor: pointer; }
