@@ -100,7 +100,7 @@ patches/files/...           files that are entirely new (written for Powertoys),
   message to yourself) in the workspace linked to the session's folder. Settings under `claude.codeNotify`:
   `minMinutes` (default 5), `"claude": {"reminders": false}` turns the reminders off, `status` (default false: also show "Claude Code: working on <folder>" as your Slack
   status while a session works), `workspace` (a workspace id for folders that are not linked).
-- **Developer features** (they use Claude through the Claude Code CLI, signed in as you, with a lean prompt; Notion
+- **Developer features** (they use Claude through the Claude Code CLI, signed in as you (on your claude.ai plan: an `ANTHROPIC_API_KEY` in your environment is left out), with a lean prompt; Notion
   through the Powertoys panel's Settings tab (Ctrl+Alt+P): **Sign in as you** (Notion's own MCP server, the one
   Claude's Notion connector uses: link titles and previews then read everything you can open, teamspaces included),
   and for saving pages, sign in with an OAuth connection whose redirect URI is
@@ -122,7 +122,7 @@ patches/files/...           files that are entirely new (written for Powertoys),
     Claude Code; files named in a message (stack traces) open in your editor; GitHub pull request, issue and Actions
     run cards update live, with Ask Claude to review (its prompt set in the panel's Settings tab; by default "Review
     the PR {pr} focusing only on major business logic issues. No nit-picking") and Watch (a reminder when the run ends).
-  - **Agents:** a panel (Ctrl+Alt+P) with your Claude Code sessions; a session's permission request can be allowed or
+  - **Agents:** a panel (Ctrl+Alt+P; a click outside closes it) with your Claude Code sessions; a session's permission request can be allowed or
     denied from Slack (or with `y`/`n` in a thread of your DM, from your phone); **Make this a Claude Code task**
     starts a session in the workspace's folder that drafts its result into the thread; **Create an issue with Claude**
     has that session write a ticket from the thread, its videos' transcripts and, only when needed, frames from them.
