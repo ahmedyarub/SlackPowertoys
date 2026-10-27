@@ -429,7 +429,7 @@
   {
    "path": "src/preload.bundle.js/powertoys-page.js",
    "kind": "add",
-   "sha256": "a585203c2697192b4abec20353f880ed4b017c42568e5a9913680a633e53fe74"
+   "sha256": "fe3ebdb233cf722de9996787d99881b54688af4c3dedc552a8e9e4a86a3aa9a5"
   }
  ]
 }

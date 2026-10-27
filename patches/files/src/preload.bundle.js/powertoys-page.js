@@ -352,13 +352,21 @@
   // when it closes. Slack's menu is left exactly as Slack made it: it tracks its items and their places itself (an item
   // put inside it made the wrong neighbour highlight). Pressing one of ours is a press outside Slack's menu, which
   // closes it as Slack does; nothing is pressed or clicked for you.
-  // A sub-menu ("Connect to apps", "Organize") is drawn as another message menu while the first is still open: our
-  // items stay under the first.
+  // A sub-menu ("Connect to apps", "Organize") is drawn as another message menu while the first is open, and Slack may
+  // draw the first again: one menu opening (one right-click or "More actions") gets one set of our items, kept where
+  // the first menu was while any of Slack's menus is open.
   let underMenu = null;
-  let underMenuOf = null;
+  let first = null; // { message, menu, rect }: the first menu of this opening
   function addMenuItems(menu, fileMenu = false) {
     if (!lastMessage || Date.now() - lastMessage.at > 5000) return;
-    if (underMenuOf?.isConnected && underMenuOf !== menu) return;
+    const at = menu.getBoundingClientRect().left | 0;
+    if (first?.message === lastMessage) {
+      if (underMenu?.isConnected) return log(`message menu: another menu at ${at}px; our items stay under the first`);
+      log(`message menu: drawn again at ${at}px; our items go back under the first, at ${first.rect.left | 0}px`);
+    } else {
+      first = { message: lastMessage, menu, rect: menu.getBoundingClientRect() };
+      log(`message menu: opened at ${at}px`);
+    }
     underMenu?.remove();
     const message = lastMessage;
     const wanted = menuItems.filter((item) => (!fileMenu || item.inFileMenu) && (!item.show || item.show(message)));
@@ -374,7 +382,8 @@
       button.setAttribute("role", "menuitem");
       button.innerHTML = SPARKLE;
       button.append(item.label);
-      if (style) Object.assign(button.style, { font: style.font, color: style.color, padding: style.padding });
+      // As tall as Slack's items: their height comes from their own layout, not their padding alone.
+      if (style) Object.assign(button.style, { font: style.font, color: style.color, padding: style.padding, minHeight: `${plain.offsetHeight}px` });
       // On the press itself: it closes Slack's menu (a press outside it), so a click wouldn't come.
       button.addEventListener("mousedown", (event) => {
         if (event.button !== 0) return;
@@ -393,20 +402,21 @@
       });
       box.append(button);
     }
+    const opening = first;
     const place = () => {
-      if (!menu.isConnected) {
+      if (!opening.menu.isConnected && !document.querySelector(fileMenu ? '[role="menu"]' : ".p-message_actions_menu")) {
         box.remove();
         if (underMenu === box) underMenu = null;
         return;
       }
-      const rect = menu.getBoundingClientRect();
+      if (opening.menu.isConnected) opening.rect = opening.menu.getBoundingClientRect();
+      const { rect } = opening;
       const fitsBelow = rect.bottom + 8 + box.offsetHeight <= innerHeight;
       Object.assign(box.style, { left: `${rect.left}px`, width: `${rect.width}px`, top: `${fitsBelow ? rect.bottom + 4 : rect.top - box.offsetHeight - 4}px` });
       requestAnimationFrame(place);
     };
     ui().appendChild(box);
     underMenu = box;
-    underMenuOf = menu;
     place();
   }
 
