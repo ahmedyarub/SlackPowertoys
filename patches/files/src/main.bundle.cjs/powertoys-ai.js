@@ -45,7 +45,9 @@
   /** Runs `claude <args>` with the prompt on stdin, in cwd -> its JSON result. */
   function run(args, prompt, cwd, timeoutMs) {
     return new Promise((resolve, reject) => {
-      const child = childProcess.spawn(claudePath(), args, { cwd: cwd && fs.existsSync(cwd) ? cwd : os.tmpdir(), windowsHide: true });
+      // Without ANTHROPIC_API_KEY, so Claude Code uses the claude.ai sign-in (the Max plan), not an API key.
+      const { ANTHROPIC_API_KEY, ...env } = process.env;
+      const child = childProcess.spawn(claudePath(), args, { cwd: cwd && fs.existsSync(cwd) ? cwd : os.tmpdir(), windowsHide: true, env });
       let out = "";
       let err = "";
       const timer = setTimeout(() => (child.kill(), reject(new Error("Claude took too long"))), timeoutMs);

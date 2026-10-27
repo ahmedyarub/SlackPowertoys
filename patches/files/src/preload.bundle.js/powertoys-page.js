@@ -352,9 +352,13 @@
   // when it closes. Slack's menu is left exactly as Slack made it: it tracks its items and their places itself (an item
   // put inside it made the wrong neighbour highlight). Pressing one of ours is a press outside Slack's menu, which
   // closes it as Slack does; nothing is pressed or clicked for you.
+  // A sub-menu ("Connect to apps", "Organize") is drawn as another message menu while the first is still open: our
+  // items stay under the first.
   let underMenu = null;
+  let underMenuOf = null;
   function addMenuItems(menu, fileMenu = false) {
     if (!lastMessage || Date.now() - lastMessage.at > 5000) return;
+    if (underMenuOf?.isConnected && underMenuOf !== menu) return;
     underMenu?.remove();
     const message = lastMessage;
     const wanted = menuItems.filter((item) => (!fileMenu || item.inFileMenu) && (!item.show || item.show(message)));
@@ -402,6 +406,7 @@
     };
     ui().appendChild(box);
     underMenu = box;
+    underMenuOf = menu;
     place();
   }
 
