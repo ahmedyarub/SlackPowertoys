@@ -1,7 +1,8 @@
 // ---------------------------------------------------------------------------------------------
 // Powertoys (local addition): videos in Slack can play louder, up to 300% (started by powertoys/page).
 //
-// Pointing at a video shows a small "Louder" slider at its top-left corner, from 100% (as Slack plays it) to 300%.
+// A "Louder" slider in the video player's own controls, right after Slack's volume control (in a message's player and
+// in the media viewer), from 100% (as Slack plays it) to 300%; it shows and hides with Slack's controls.
 // Above 100% the video's sound goes through a gain (Web Audio). A video from files.slack.com is first reloaded with
 // credentialed CORS (files.slack.com allows it), where it was, because Chromium silences a cross-origin video's sound
 // in Web Audio otherwise. Slack's own volume control still works and is multiplied by this one.
@@ -14,12 +15,14 @@
   const boosts = new WeakMap(); // video -> { gain, percent }
   let context = null;
 
+  // In Slack's page (the player's controls are Slack's own nodes), so in the document, not in Powertoys' layer.
   const STYLE = `
-    .louder { position: fixed; z-index: 2147483646; display: flex; align-items: center; gap: 6px; padding: 4px 8px;
-      border-radius: 6px; background: rgba(26,29,33,.85); color: #fff; font: 12px Lato, "Segoe UI", sans-serif; }
-    .louder input { width: 110px; accent-color: #1d9bd1; margin: 0; }
-    .louder input:focus-visible { outline: 2px solid #1d9bd1; outline-offset: 2px; }
-    .louder[hidden] { display: none; }`;
+    .powertoys-louder { display: flex; align-items: center; gap: 4px; height: 28px; margin: 0 8px; color: #fff;
+      font: 700 12px Lato, "Segoe UI", sans-serif; white-space: nowrap; transition: opacity 80ms cubic-bezier(.36,.19,.29,1); }
+    .powertoys-louder input { width: 64px; accent-color: #fff; margin: 0; cursor: pointer; }
+    .powertoys-louder input:focus-visible { outline: 2px solid #1d9bd1; outline-offset: 2px; }
+    .powertoys-louder span { min-width: 34px; font-variant-numeric: tabular-nums; }
+    .p-video_controls_overlay--design_polish:not(:hover):not(.p-video_controls_overlay--active) .powertoys-louder { opacity: 0; }`;
 
   /** Reloads a files.slack.com video with credentialed CORS, back where it was (playing if it was). */
   function reloadWithCors(video) {
@@ -74,93 +77,80 @@
     }, 1500);
   }
 
-  // --- The slider ------------------------------------------------------------------------------------------
-  let control = null;
-  let current = null; // the video the slider is for
-  let hideTimer = null;
-
-  function slider() {
-    if (control?.isConnected) return control;
-    const root = page.ui();
-    if (!root.querySelector("style[data-louder]")) {
-      const style = document.createElement("style");
-      style.dataset.louder = "1";
-      style.textContent = STYLE;
-      root.appendChild(style);
+  // --- The slider, in the player's controls ----------------------------------------------------------------
+  /** The video a player's control belongs to: the nearest one up its ancestors (the player can redraw its video). */
+  function videoOf(node) {
+    for (let at = node.parentElement; at && at !== document.body; at = at.parentElement) {
+      const video = at.querySelector("video");
+      if (video) return video;
     }
-    control = document.createElement("div");
-    control.className = "louder";
-    control.hidden = true;
-    const label = document.createElement("label");
-    label.textContent = "Louder";
+    return null;
+  }
+
+  function show(control, percent) {
+    const input = control.querySelector("input");
+    input.value = String(percent);
+    input.setAttribute("aria-valuetext", `${percent}%`);
+    control.querySelector("span").textContent = `${percent}%`;
+  }
+
+  function sliderFor(volume) {
+    const control = document.createElement("div");
+    control.className = "powertoys-louder";
+    control.title = "Louder (Powertoys), up to 300%";
     const input = document.createElement("input");
     input.type = "range";
     input.min = "100";
     input.max = String(MAX);
     input.step = "10";
-    input.id = "powertoys-louder";
-    label.htmlFor = input.id;
+    input.setAttribute("aria-label", "Louder");
     const shown = document.createElement("span");
     shown.setAttribute("aria-hidden", "true");
+    control.append(input, shown);
+    // The player plays, pauses and seeks on its clicks and keys; the slider's own stay with the slider.
+    for (const type of ["pointerdown", "mousedown", "mouseup", "click", "dblclick", "keydown", "keyup"]) control.addEventListener(type, (event) => event.stopPropagation());
     input.addEventListener("input", () => {
       const percent = Number(input.value);
-      shown.textContent = `${percent}%`;
-      input.setAttribute("aria-valuetext", `${percent}%`);
-      const video = current;
+      show(control, percent);
+      const video = videoOf(control);
       if (!video) return;
       setLouder(video, percent).catch((caught) => {
-        input.value = String(boosts.get(video)?.percent ?? 100);
-        shown.textContent = `${input.value}%`;
+        show(control, boosts.get(video)?.percent ?? 100);
         page.notice(`Couldn't make it louder: ${caught.message}`);
       });
     });
-    control.append(label, input, shown);
-    control.addEventListener("pointerenter", () => clearTimeout(hideTimer));
-    control.addEventListener("pointerleave", hideSoon);
-    root.appendChild(control);
+    control.addEventListener("pointerenter", () => {
+      const video = videoOf(control);
+      if (video && document.activeElement !== input) show(control, boosts.get(video)?.percent ?? 100);
+    });
+    show(control, boosts.get(videoOf(volume))?.percent ?? 100);
     return control;
   }
 
-  function showFor(video) {
-    clearTimeout(hideTimer);
-    const box = slider();
-    const rect = video.getBoundingClientRect();
-    box.style.left = `${Math.max(0, rect.left + 8)}px`;
-    box.style.top = `${Math.max(0, rect.top + 8)}px`;
-    if (current !== video) {
-      current = video;
-      const percent = boosts.get(video)?.percent ?? 100;
-      const input = box.querySelector("input");
-      input.value = String(percent);
-      input.setAttribute("aria-valuetext", `${percent}%`);
-      box.querySelector("span").textContent = `${percent}%`;
-    }
-    box.hidden = false;
-  }
-
-  function hideSoon() {
-    clearTimeout(hideTimer);
-    hideTimer = setTimeout(() => control && !control.contains(control.getRootNode().activeElement) && (control.hidden = true), 1500);
-  }
-
-  // Slack lays its own controls over a video, so the pointer is matched by position, not by the element under it.
+  // Players come and go as Slack draws them: each one with a video gets the slider after its volume control.
+  let placed = false;
   let pending = false;
-  function onPointerMove(event) {
-    if (pending) return;
-    pending = true;
-    requestAnimationFrame(() => {
-      pending = false;
-      const video = [...document.querySelectorAll("video")].find((each) => {
-        const rect = each.getBoundingClientRect();
-        return rect.width > 80 && rect.height > 60 && event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
-      });
-      if (video) showFor(video);
-      else if (control && !control.hidden) hideSoon();
-    });
+  function place() {
+    pending = false;
+    for (const volume of document.querySelectorAll(".p-media_volume_slider")) {
+      if (volume.nextElementSibling?.classList.contains("powertoys-louder") || !videoOf(volume)) continue;
+      volume.after(sliderFor(volume));
+      if (!placed) page.log("louder: the slider is in a video player's controls");
+      placed = true;
+    }
   }
 
   exports.start = function start(pageModule) {
     page = pageModule;
-    document.addEventListener("pointermove", onPointerMove, { passive: true, capture: true });
+    const style = document.createElement("style");
+    style.dataset.powertoysLouder = "1";
+    style.textContent = STYLE;
+    document.head.appendChild(style);
+    new MutationObserver(() => {
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(place);
+    }).observe(document.body, { childList: true, subtree: true });
+    place();
   };
 });

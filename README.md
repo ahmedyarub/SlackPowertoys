@@ -136,7 +136,8 @@ patches/files/...           files that are entirely new (written for Powertoys),
   Slack reloads that conversation); an edited message gets "earlier version" next to Slack's "(edited)". Every copy is
   saved to `%APPDATA%\Slack\powertoys\history\messages.jsonl` before the message is marked, and listed in the panel's
   History tab. Only what your Slack sees while it runs is kept.
-- **Louder videos:** pointing at a video shows a "Louder" slider, 100% to 300%, on top of Slack's own volume.
+- **Louder videos:** a "Louder" slider in the video player's controls, next to Slack's volume, 100% to 300%, on top of
+  Slack's own volume.
 - **More from each recording:** a transcript with who spoke (from Slack's live captions, also as a subtitle track);
   **★ Mark** (or Ctrl+Shift+M) in the huddle window to mark a moment, which becomes a chapter; stills of the screen
   whenever it changes a lot (a new slide, another shared screen). Share with Claude hands all three over before the

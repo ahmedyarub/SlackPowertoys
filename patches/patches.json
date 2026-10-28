@@ -414,7 +414,7 @@
   {
    "path": "src/preload.bundle.js/powertoys-page-media.js",
    "kind": "add",
-   "sha256": "162d0c32c55403ddd8a8fedf596d193c55131e884a422af215ae9acd54c2496f"
+   "sha256": "286c3a936671ade83b27b283ec50982c1dc85707d0d66556e58eae2ee431c2af"
   },
   {
    "path": "src/preload.bundle.js/powertoys-page-panel.js",
