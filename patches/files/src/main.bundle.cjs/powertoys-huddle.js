@@ -13,7 +13,8 @@
 // to keep it ("huddle": { "autoRecord": true, "recordingsFolder": "<folder>" }).
 // When a huddle starts or rings, the Bluetooth radio goes on and Windows connects your paired headphones (the paired
 // device registered as headphones or a headset; "huddle": { "headphones": "<part of a name>" } picks one; null: off);
-// if Bluetooth was off, it goes off again when the huddle ends, at Cancel or Decline, or when a ring stops unanswered.
+// if Bluetooth was off, it goes off again when the huddle ends, at Cancel or Decline, when the window that rang is
+// closed without a huddle, or when a ring stops unanswered (a headphones step still connecting is stopped first).
 // The scripts talk to the main process through tagged console messages; answers go back with executeJavaScript.
 // ---------------------------------------------------------------------------------------------
 (function (module, exports, __webpack_require__) {
@@ -678,7 +679,7 @@ function Await($op, [Type]$t) { $task = $asTask.MakeGenericMethod($t).Invoke($nu
 Await ([Windows.Devices.Radios.Radio]::RequestAccessAsync()) ([Windows.Devices.Radios.RadioAccessStatus]) | Out-Null
 $radio = (Await ([Windows.Devices.Radios.Radio]::GetRadiosAsync()) ([System.Collections.Generic.IReadOnlyList[Windows.Devices.Radios.Radio]])) | Where-Object { $_.Kind -eq 'Bluetooth' }
 if (-not $radio) { 'no-radio'; exit }
-if ($radio.State -ne 'On') { 'radio-turned-on'; Await ($radio.SetStateAsync('On')) ([Windows.Devices.Radios.RadioAccessStatus]) | Out-Null; Start-Sleep -Seconds 2 }
+if ($radio.State -ne 'On') { [Console]::Out.WriteLine('radio-turned-on'); [Console]::Out.Flush(); Await ($radio.SetStateAsync('On')) ([Windows.Devices.Radios.RadioAccessStatus]) | Out-Null; Start-Sleep -Seconds 2 }
 $selector = [Windows.Devices.Bluetooth.BluetoothDevice]::GetDeviceSelectorFromPairingState($true)
 $paired = Await ([Windows.Devices.Enumeration.DeviceInformation]::FindAllAsync($selector)) ([Windows.Devices.Enumeration.DeviceInformationCollection])
 $found = $null
@@ -707,6 +708,8 @@ if ($device.ConnectionStatus -eq 'Connected') { "connected $($found.Name)" } els
   // When a huddle starts (yours, one you join, or one ringing): "huddle": { "headphones": "" } picks the paired device
   // Windows registered as headphones or a headset, whatever its name; a name picks that device; null turns it off.
   let connecting = false;
+  let connectingChild = null; // the headphones step's PowerShell: stopped when the huddle is cancelled or its window closed
+  let connectingStopped = false;
   // Bluetooth was off and Powertoys turned it on: it goes off again when the huddle ends (or the ringing stops
   // without a huddle), once no huddle window is open.
   // (Kept in powertoys\bluetooth.json, so a restart of Slack in between doesn't forget it.)
@@ -738,6 +741,7 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
   // Where a huddle is ringing or about to start right now (a window's id, or "main" for Slack's main window), and the
   // one pending "off" (a new ring, start screen or huddle cancels it): Bluetooth never goes off while either is open.
   const ringingIn = new Set();
+  const rang = new Set(); // the windows that rang (or showed the screen before joining) and haven't closed
   let offTimer = null;
   function bluetoothOffLater(why, ms) {
     clearTimeout(offTimer);
@@ -769,6 +773,7 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
   function ringStarted(where) {
     log("huddle ringing");
     ringingIn.add(where);
+    rang.add(where);
     keepBluetooth();
     headphonesOn("ringing").catch((caught) => warn(`headphones: ${caught.message}`));
   }
@@ -777,7 +782,25 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     log("huddle cancelled");
     ringingIn.delete(where);
     keepBluetooth();
+    stopConnecting();
     bluetoothOff("cancelled").catch((caught) => warn(`bluetooth: ${caught.message}`));
+  }
+  /** The window that rang closed without a huddle: Bluetooth off 3 s later, unless a huddle or another ring is on. */
+  function ringWindowClosed() {
+    log("huddle ring window closed");
+    clearTimeout(offTimer);
+    offTimer = setTimeout(() => {
+      offTimer = null;
+      if (huddles.size || ringingIn.size) return;
+      stopConnecting();
+      bluetoothOff("ring window closed").catch((caught) => warn(`bluetooth: ${caught.message}`));
+    }, 3000);
+  }
+  /** Still connecting the headphones: stopped, so Bluetooth goes off now rather than when that step gives up. */
+  function stopConnecting() {
+    if (!connectingChild) return;
+    connectingStopped = true;
+    connectingChild.kill();
   }
   /** The ringing stopped some other way (answered, missed): off 15 s later, unless a huddle or another ring is on. */
   function ringEnded(where) {
@@ -793,16 +816,17 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
       const script = path.join(os.tmpdir(), "powertoys-headphones.ps1");
       fs.writeFileSync(script, HEADPHONES_SCRIPT);
       const notice = (text) => slackPage()?.send("powertoys:notice", { text });
-      const output = await new Promise((resolve) =>
-        __webpack_require__(35317).execFile(
+      const output = await new Promise((resolve) => {
+        connectingChild = __webpack_require__(35317).execFile(
           "powershell.exe",
           ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, ...(headphones ? ["-Name", headphones] : [])],
           { windowsHide: true, timeout: 60000 },
           (caught, stdout) => resolve(caught && !stdout ? `error ${caught.message}` : String(stdout).trim()),
-        ),
-      );
+        );
+      });
       const lines = output.split(/\r?\n/);
       if (lines.includes("radio-turned-on")) setBluetoothOurs(true);
+      if (connectingStopped) return log(`huddle ${why}: headphones step stopped${bluetoothOurs ? " (Bluetooth turned on by Powertoys)" : ""}`);
       log(`huddle ${why}: headphones ${lines.at(-1)}${bluetoothOurs ? " (Bluetooth turned on by Powertoys)" : ""}`);
       const [result, ...name] = lines.at(-1).split(" ");
       if (result === "already") return;
@@ -816,6 +840,8 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
       );
     } finally {
       connecting = false;
+      connectingChild = null;
+      connectingStopped = false;
       if (offWanted) {
         const why = offWanted;
         offWanted = null;
@@ -846,14 +872,16 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     };
     new MutationObserver(check).observe(document.documentElement, { childList: true, subtree: true });
     check();
-    // Cancel (the screen before starting or joining) or Decline (an incoming huddle).
+    // Cancel (the screen before starting or joining) or Decline (an incoming huddle). In the window with a preview they
+    // are icon buttons, named only by their aria-label.
     document.addEventListener(
       "click",
       (event) => {
         const button = event.target.closest?.("button, [role=button]");
         if (!button || !ringing) return;
         const qa = button.dataset?.qa ?? "";
-        if (/cancel|decline|dismiss/i.test(qa) || /^(cancel|decline|not now)$/i.test(button.textContent.trim())) send({ type: "cancelled" });
+        const name = (button.getAttribute("aria-label") || button.textContent).trim();
+        if (/cancel|decline|dismiss/i.test(qa) || /^(cancel|decline|not now)$/i.test(name)) send({ type: "cancelled" });
       },
       true,
     );
@@ -881,12 +909,13 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     });
     contents.once("destroyed", () => {
       const wasHuddle = huddles.delete(contents.id);
-      const wasRinging = ringingIn.delete(contents.id);
+      ringingIn.delete(contents.id);
+      const wasRinging = rang.delete(contents.id);
       stopRecording(contents, true).catch((caught) => warn(`recording: ${caught.message}`));
       // The huddle ended (or its ringing / start screen closed): Bluetooth off again if Powertoys turned it on. Any
       // other window (Powertoys' recorder, ...) has nothing to do with it.
       if (wasHuddle) bluetoothOffLater("ended", 3000);
-      else if (wasRinging) bluetoothOffLater("ring window closed", 15000);
+      else if (wasRinging) ringWindowClosed();
     });
     // The window is about:blank until Slack's page draws in it; the watcher goes in as soon as it can run.
     // (A window Slack's page opens says it is at the page's address from inside, so its main window is told apart

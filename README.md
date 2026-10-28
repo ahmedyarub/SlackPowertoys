@@ -79,7 +79,8 @@ patches/files/...           files that are entirely new (written for Powertoys),
   and type follow-up questions in. From the moment a huddle rings or its start screen opens, Bluetooth goes on and
   Windows connects your paired
   headphones (found by their Bluetooth class, whatever their name; `"huddle": {"headphones": "<name>"}` picks a
-  device, `null` turns it off). If Bluetooth was off, it goes off again when the huddle ends, or at Cancel/Decline.
+  device, `null` turns it off). If Bluetooth was off, it goes off again when the huddle ends, at Cancel/Decline, or when you close the window
+  that rang.
 - **Recording every huddle:** the huddle window, the call's sound and your microphone, encoded by your graphics card,
   to `.mkv` in `"huddle": {"recordingsFolder"}`. The call's sound is taken inside Slack, from the huddle's incoming
   audio as it arrives (you keep hearing it as usual), so it is recorded whichever speaker or headphones play it; the
