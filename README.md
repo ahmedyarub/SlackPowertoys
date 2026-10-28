@@ -70,8 +70,9 @@ patches/files/...           files that are entirely new (written for Powertoys),
 - **A transcript for every video:** each video or audio file posted gets Slack's own transcript requested right away
   (what "Generate transcript" does), so it is there when you need it (`"claude": {"autoTranscripts": false}` turns
   it off).
-- **Huddles:** the huddle window opens maximized with captions side by side instead of the huddle's thread (side by
-  side only: the closed-caption overlay is turned off). A
+- **Huddles:** the huddle window opens maximized, from the screen before joining, with captions side by side instead
+  of the huddle's thread (side by side only: the closed-caption overlay is turned off). Slack's "Heads up — AI notes
+  are on" notice is closed for you, as its **Got It** would. A
   "Claude session" dropdown in the captions panel picks one of your Claude Code sessions in the workspace's folder,
   or a new one (the default). Double-click a caption, select several and press **Ask Claude**, or right-click: the
   question is asked in that session (it stays there) by a fast model, and the answer shows in a pop-up you can drag

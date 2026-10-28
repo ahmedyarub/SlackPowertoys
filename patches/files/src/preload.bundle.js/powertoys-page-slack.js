@@ -8,6 +8,9 @@
 // creators "Set enabled state for huddle closed captions view" and "Set selected tab". It watches the stores: when
 // side-by-side comes on, the Captions tab is selected; when the overlay comes on with it (within 2 s: Slack's join
 // default), it is turned off. The overlay turned on later from the menu stays. Nothing is clicked.
+// Slack's "Heads up — AI notes are on" notice, shown to who joins a huddle with AI notes on, is closed as its "Got It"
+// does: taken out of Slack's open modals (its modal store), and the store told. The notice the one who starts AI notes
+// gets ("Everyone ready to start AI notes?", Start or Cancel) stays.
 // ---------------------------------------------------------------------------------------------
 (function (module, exports, __webpack_require__) {
   "use strict";
@@ -28,6 +31,7 @@
       captions: ['"Set enabled state for huddle closed captions view"'],
       tabs: ['"Set selected tab"', '"Upsert huddle object"'],
       client: ["function dispatchForClientStore"],
+      modals: ['"Sets a flag that will prevent the video recorder modal from being closed"', "modalsByTeamAndWindow"],
     };
     const ids = {};
     const scanned = new Set();
@@ -47,12 +51,15 @@
       scan();
       if (Object.keys(WANTED).some((key) => !ids[key])) return null;
       // Loaded the way Slack loads them (already loaded: their exports as they are).
-      const [stores, captions, tabs, client] = ["stores", "captions", "tabs", "client"].map((key) => load(ids[key]));
+      const [stores, captions, tabs, client, modals] = ["stores", "captions", "tabs", "client", "modals"].map((key) => load(ids[key]));
       const parts = {
         storeMap: exported(stores, (value) => value.name === "getStoreInstanceMap"),
         closedCaptions: creator(captions, "Set enabled state for huddle closed captions view"),
         selectTab: creator(tabs, "Set selected tab"),
         dispatchForClient: exported(client, (value) => value.name === "dispatchForClientStore"),
+        // The open modals, by workspace and window, and the action that tells the store they changed.
+        openModals: Object.values(modals ?? {}).find((value) => value?.constructor === Object),
+        modalsChanged: creator(modals, "Open a modal"),
       };
       const missing = Object.keys(parts).filter((key) => !parts[key]);
       if (missing.length && !find.warned) say(`captions: Slack's modules found, but not ${missing.join(", ")} in them`);
@@ -68,7 +75,12 @@
         watched.add(store);
         let last = store.getState()?.huddleEvents ?? {};
         let sideBySideAt = 0;
+        let modalsAt = store.getState()?.modal?.lastUpdated;
         store.subscribe(() => {
+          if (store.getState()?.modal?.lastUpdated !== modalsAt) {
+            modalsAt = store.getState()?.modal?.lastUpdated;
+            closeAiNotesNotice(store);
+          }
           const now = store.getState()?.huddleEvents;
           if (!now || now === last) return;
           const before = last;
@@ -88,6 +100,17 @@
       }
     }
 
+    // "Got It" closes the notice and nothing else; so does this, wherever it is open.
+    function closeAiNotesNotice(store) {
+      for (const [key, modals] of Object.entries(found.openModals)) {
+        const kept = modals.filter((modal) => !(modal?.name === "SlackAIHuddleRecordingLegalModal" && !modal.element?.props?.isInitiator));
+        if (kept.length === modals.length) continue;
+        found.openModals[key] = kept;
+        store.dispatch(found.modalsChanged());
+        say('huddle: the "AI notes are on" notice is closed, as its Got It would');
+      }
+    }
+
     // Slack's modules arrive as its code loads: looked for every 2 s for 3 minutes; the stores, then every 10 s.
     let tries = 0;
     const look = setInterval(() => {
@@ -98,7 +121,7 @@
       }
       if (found) {
         clearInterval(look);
-        say("captions: Slack's caption and tab actions found");
+        say("captions: Slack's caption, tab and modal actions found");
         watch();
         setInterval(watch, 10000);
       } else if (++tries > 90) {

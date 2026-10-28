@@ -1,8 +1,9 @@
 // ---------------------------------------------------------------------------------------------
 // Powertoys (local addition): huddles and Claude. Slack draws a huddle's window itself (an about:blank window its page
 // opened), so Powertoys adds a script to it once the huddle shows there:
-//   - the window opens maximized, and its side panel shows Captions rather than the huddle's Thread; captions are
-//     side-by-side only, never the closed-caption overlay (set through Slack's own state: powertoys/page-slack);
+//   - the window is maximized from the screen before joining or starting the huddle; its side panel shows Captions
+//     rather than the huddle's Thread; captions are side-by-side only, never the closed-caption overlay (set through
+//     Slack's own state: powertoys/page-slack), and the "AI notes are on" notice is closed as "Got It" would;
 //   - a "Claude session" dropdown, always in view (in the Captions list's header), picks one of the Claude Code
 //     sessions of the workspace's folder (Claude Desktop's or the CLI's, worktrees included, from ~/.claude/projects),
 //     or "(New session)", the default, started with the first question;
@@ -839,7 +840,7 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
       }
       // An incoming huddle's card, or the screen before joining or starting one (Slack's invite window with a preview).
       const now = !!document.querySelector('.p-huddle_invite, [data-qa^="huddle_invite_window_with_preview"]');
-      if (now && !ringing) send({ type: "ringing" });
+      if (now && !ringing) send({ type: "ringing", preview: !!document.querySelector('[data-qa^="huddle_invite_window_with_preview"]') });
       if (!now && ringing) send({ type: "ring-ended" });
       ringing = now;
     };
@@ -869,7 +870,10 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
       } catch {
         return;
       }
-      if (message.type === "ringing") return ringStarted(contents.id);
+      if (message.type === "ringing") {
+        if (message.preview) maximize(contents, "the screen before joining");
+        return ringStarted(contents.id);
+      }
       if (message.type === "ring-ended") return ringEnded(contents.id);
       if (message.type === "cancelled") return ringCancelled(contents.id);
       if (message.type === "huddle") return addClaude(contents).catch((caught) => warn(`huddle: ${caught.message}`));
@@ -894,12 +898,18 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     }, 500);
   }
 
+  /** The huddle window is maximized as soon as it shows the screen before joining (else when the huddle shows). */
+  function maximize(contents, shown) {
+    const huddleWindow = electron.BrowserWindow.fromWebContents(contents);
+    if (!huddleWindow || huddleWindow.isMaximized()) return;
+    huddleWindow.maximize();
+    log(`huddle window: maximized (it shows ${shown})`);
+  }
+
   async function addClaude(contents) {
     huddles.set(contents.id, { folder: currentFolder(), session: null, sessions: [], created: new Set() });
     keepBluetooth();
-    // The huddle window opens maximized.
-    const huddleWindow = electron.BrowserWindow.fromWebContents(contents);
-    if (huddleWindow && !huddleWindow.isMaximized()) huddleWindow.maximize();
+    maximize(contents, "the huddle");
     headphonesOn("started").catch((caught) => warn(`headphones: ${caught.message}`));
     await contents.executeJavaScript(`(${huddleWindowScript.toString()})()`, true);
     log(`huddle window: Claude added (folder ${huddles.get(contents.id)?.folder ?? "none"})`);
