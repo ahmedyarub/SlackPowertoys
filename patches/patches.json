@@ -1,5 +1,5 @@
 {
- "app": "Slack 4.52.182 for Windows",
+ "app": "Slack 4.53.276 for Windows",
  "files": [
   {
    "path": "mcp/claude-code-hook.mjs",
@@ -12,13 +12,48 @@
    "sha256": "80ec3f51a94addc06aa98787b2d9f871caf587f2e99911857981dbbe44119cd5"
   },
   {
-   "path": "src/main.bundle.cjs/33229-main/0037.js",
+   "path": "src/main.bundle.cjs/6440-windows-startup-login-items.js",
    "kind": "edit",
-   "baseSha256": "d1bd4c6f37133b15377a76714e27b907704c2ce3a87a26c73e2cc1e3b8d9faa5",
-   "resultSha256": "5380dd5d70a27ec7a0cfdb5e06aa8fde2c5c462c9d030606ba4259c57371e3d9",
+   "baseSha256": "d4bb6feb581c63f186c5ca26dc6f7742841034d373ef9221b0d9cd839ff78250",
+   "resultSha256": "c2a727d5c8a484c849794c1adbccaa2480942700b29d1f5d73c7811eb6288a44",
    "hunks": [
     {
-     "at": 270,
+     "at": 17,
+     "remove": 0,
+     "add": [
+      [
+       "  // Local change: this build has no Squirrel launcher one folder up, so it starts itself (with only --startup).\n"
+      ],
+      [
+       "  let startsItself = !fsExtraLib.existsSync(stubExePath) && ((stubExePath = process.execPath), true);\n"
+      ]
+     ]
+    },
+    {
+     "at": 19,
+     "remove": 1,
+     "removeSha256": "bfe4e943b774d0251533ca456e0806316630c1a6bf9bac58192b865a14675e4f",
+     "add": [
+      [
+       "  let startupArgs = startsItself ? [\"--startup\"] :",
+       [
+        19,
+        19,
+        59
+       ]
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "path": "src/main.bundle.cjs/65031-main/0041.js",
+   "kind": "edit",
+   "baseSha256": "536b4a37ad9884d46f239f51703ed1dc9e3a67c5ca02b48b07b9b572e284934a",
+   "resultSha256": "0cf11623a8a8f36cb0ba1df3b656540e7d7bff7656fdcde811726f05a4a9b9d6",
+   "hunks": [
+    {
+     "at": 299,
      "remove": 0,
      "add": [
       [
@@ -29,52 +64,17 @@
    ]
   },
   {
-   "path": "src/main.bundle.cjs/33229-main/0050.js",
+   "path": "src/main.bundle.cjs/65031-main/0056.js",
    "kind": "edit",
-   "baseSha256": "7af8c904f8f14c2014fc952f643c64e89555425c037a536e23273ef8a06c4207",
-   "resultSha256": "a862751ce72d381dea6425bb7e28170d434e2636a3d162060f1136af05e88792",
+   "baseSha256": "7efb91bdbf50c44bd7c56c54ec0d7a0f48f4372167ed1e96bedb29e75b3c2baa",
+   "resultSha256": "7c208a675315fd8d0e977176cc3f95a4260f8516d120e991558ab9f027f7b8a4",
    "hunks": [
     {
-     "at": 328,
+     "at": 198,
      "remove": 0,
      "add": [
       [
-       "      __webpack_require__(\"powertoys/main\").start(appStore); // Local change: Powertoys (powertoys-main.js)\n"
-      ]
-     ]
-    }
-   ]
-  },
-  {
-   "path": "src/main.bundle.cjs/6440-windows-startup-login-items.js",
-   "kind": "edit",
-   "baseSha256": "75bb050d933a83cf3569bae8e598a297a1c9c2cf9b3eaf45cc6c5c29b5fde74f",
-   "resultSha256": "f37480301666c9af23b232cc9f5858bfa8eedb2437c57c95256a2d5c78a09923",
-   "hunks": [
-    {
-     "at": 17,
-     "remove": 0,
-     "add": [
-      [
-       "  // Local change: this build has no Squirrel launcher one folder up, so it starts itself (with only --startup).\n"
-      ],
-      [
-       "  let startsItself = !fsExtra.existsSync(stubExePath) && ((stubExePath = process.execPath), true);\n"
-      ]
-     ]
-    },
-    {
-     "at": 19,
-     "remove": 1,
-     "removeSha256": "34b380d785d14fb9156c11f34407b07ad1a9f78f69ec7bcf61f20f30954d435d",
-     "add": [
-      [
-       "  let y = startsItself ? [\"--startup\"] :",
-       [
-        19,
-        9,
-        49
-       ]
+       "      __webpack_require__(\"powertoys/main\").start(store); // Local change: Powertoys (powertoys-main.js)\n"
       ]
      ]
     }
@@ -83,11 +83,11 @@
   {
    "path": "src/main.bundle.cjs/_bundle.json",
    "kind": "edit",
-   "baseSha256": "fb7b64ecb07e5af832d2361fae4eba88af9d15f98d78e1798a8fb950b1b0c9e9",
-   "resultSha256": "9716cc46cbbf842f399343f46cdca0434f880511dca69b9cc3730166627ee191",
+   "baseSha256": "24a3f8c0b77a535fed183c68ced0b306b0e45d0fbcce1260d1d9b90e471abf98",
+   "resultSha256": "b55d76f0ccb927899e2bf3662cd7d8067d11107a017562e9741f04adb24bbedd",
    "hunks": [
     {
-     "at": 6531,
+     "at": 6061,
      "remove": 0,
      "add": [
       [
@@ -267,11 +267,11 @@
   {
    "path": "src/preload.bundle.js/_bundle.json",
    "kind": "edit",
-   "baseSha256": "3924b9d2aca28048076479ce3edc8197cff34e57cccac5583f632bdd7f25cb3a",
-   "resultSha256": "d4ef9c81962b88629133ed9688731fd88f9e6362ec465e2a8e9cc77e004c8c94",
+   "baseSha256": "400047c1c86bd768c9c0bb5d39ada8c1be1b7861cc8bcfa83bc3de143cd7d761",
+   "resultSha256": "3e13c46667500dc1264d68e52df986961350611c87a6c4413df72dfe7115f1fb",
    "hunks": [
     {
-     "at": 2935,
+     "at": 2938,
      "remove": 0,
      "add": [
       [
@@ -377,11 +377,11 @@
   {
    "path": "src/preload.bundle.js/_runtime.js",
    "kind": "edit",
-   "baseSha256": "0ed51fc4284115c1b689da4132ffc75e634bf94f6f204c8e62ec8c39d94a98a0",
-   "resultSha256": "5fb3c0a9e2726922d8fd911b9853cdc51cfba57c30b8068446cd533253e11355",
+   "baseSha256": "2b35460d634c524a6331c9f0f242d52c64d2f71ffdd9df36c641e652c83626f6",
+   "resultSha256": "79bd9c58fd54d1236ac34c20d8e039db022a0457cbfedc0b58809310cd75ec48",
    "hunks": [
     {
-     "at": 5371,
+     "at": 5787,
      "remove": 0,
      "add": [
       [

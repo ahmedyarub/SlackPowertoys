@@ -186,7 +186,7 @@ nothing of that file is in the patch. The patcher reconstructs the edited file f
 
 ## What the patches apply to
 
-The patches are for **Slack 4.52.182 for Windows**, laid out as the paths in `patches.json` show. Every edited file is
+The patches are for **Slack 4.53.276 for Windows**, laid out as the paths in `patches.json` show. Every edited file is
 checked by SHA-256, so the patches apply only to byte-identical files and refuse anything else.
 
 ## Applying them
