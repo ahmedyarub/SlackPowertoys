@@ -1294,7 +1294,11 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
 
   /** A part failed while the huddle goes on: it is closed as it is and a new part starts. */
   async function partFailed(recording, part, reason) {
+    // Once: a take still running when the part failed can fail too, while the part is being ended (it stays the
+    // recording's part until the new one starts); a second new part would get the same file and both would write to it.
+    if (part.failed) return warn(`recording: ${reason} (the part is already being replaced)`);
     if (recording.part !== part || recording.stopping) return;
+    part.failed = true;
     warn(`recording: ${reason}; starting a new part`);
     await endPart(recording, part);
     dropEmptyPart(recording);
