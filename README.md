@@ -76,7 +76,8 @@ patches/files/...           files that are entirely new (written for Powertoys),
   "Claude session" dropdown in the captions panel picks one of your Claude Code sessions in the workspace's folder,
   or a new one (the default). Double-click a caption, select several and press **Ask Claude**, or right-click: the
   question is asked in that session (it stays there) by a fast model, and the answer shows in a pop-up you can drag
-  and type follow-up questions in. From the moment a huddle rings or its start screen opens, Bluetooth goes on and
+  and type follow-up questions in. While the call is recorded, the caption lines go with their time in the recording,
+  so Claude can look at the screen at that moment. Ctrl+A in the captions selects only the captions. From the moment a huddle rings or its start screen opens, Bluetooth goes on and
   Windows connects your paired
   headphones (found by their Bluetooth class, whatever their name; `"huddle": {"headphones": "<name>"}` picks a
   device, `null` turns it off). If Bluetooth was off, it goes off again when the huddle ends, at Cancel/Decline, or when you close the window
@@ -109,7 +110,8 @@ patches/files/...           files that are entirely new (written for Powertoys),
   `http://localhost:47821/notion/callback`, or paste an internal integration's secret; GitHub through the `gh` CLI):
   - **Notion:** link previews (title, path, status, assignees, last edit, first lines; notion.so, notion.site and
     app.notion.com links); a pasted link goes in at once, and its title, linked, replaces it once known (a Notion
-    ticket as "ISS-1995 Title", with its database's ID; a GitHub title; or any page's title). A Notion page not shared
+    ticket as "ISS-1995 Title", with its database's ID; a GitHub title; or any page's title). A ticket ID you type or
+    paste ("ISS-1780") becomes a link to its Notion page. A Notion page not shared
     with your connection keeps its link and a notice says why. **Save to Notion** in the message menu (a thread, huddle or
     clip, summarized with decisions and action items); **Draft a postmortem in Notion** in incident channels. Claude
     picks where each new page goes (an Incidents database for a postmortem, say) among the pages you shared.

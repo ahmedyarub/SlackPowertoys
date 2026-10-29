@@ -51,7 +51,10 @@
   /** The folder Claude Code works in for a workspace (claude.folders), if any. */
   const folderOf = (teamId) => readSettings().claude?.folders?.[teamId] ?? null;
 
+  // The folder as Windows writes it (E:\a\b): Claude Desktop files a session under its project by that exact path, and
+  // claude.folders may say E:/a/b.
   function openClaude(prompt, folder) {
+    if (folder) folder = path.win32.resolve(folder);
     const url = folder ? `claude://code/new?folder=${encodeURIComponent(folder)}&q=${encodeURIComponent(prompt)}` : `claude://claude.ai/new?q=${encodeURIComponent(prompt)}`;
     return electron.shell.openExternal(url);
   }

@@ -8,7 +8,9 @@
 //     sessions of the workspace's folder (Claude Desktop's or the CLI's, worktrees included, from ~/.claude/projects),
 //     or "(New session)", the default, started with the first question;
 //   - double-click a caption (or right-click it, "Ask Claude"): the question is asked in that session itself (it
-//     stays there, with the answer), and the answer shows in a pop-up.
+//     stays there, with the answer), and the answer shows in a pop-up; while recording, its caption lines carry their
+//     time in the recording, with where the video is, so the session can take a frame at that moment;
+//   - Ctrl+A after a click in the captions selects the caption lines only.
 // Each huddle is recorded to a file (the window, the call's sound, your microphone); when it ends, Slack asks whether
 // to keep it ("huddle": { "autoRecord": true, "recordingsFolder": "<folder>" }).
 // When a huddle starts or rings, the Bluetooth radio goes on and Windows connects your paired headphones (the paired
@@ -270,7 +272,9 @@
     const textOf = (line) => line.querySelector('[data-qa="huddle_transcribe_event"], .p-huddle_closed_caption_event__transcription')?.textContent.trim() ?? "";
     // (The overlay's names end with a colon.)
     const nameOf = (line) => line.querySelector(".p-huddle_event_log__member_name, .p-huddle_closed_caption_event__member_name")?.textContent.trim().replace(/:$/, "") ?? "";
-    /** A caption line as a question, with who said it and the lines before it. */
+    // When a caption line was first seen (its time in the recording, worked out by the main process), if known.
+    const atOf = (line) => captions.get(line)?.at ?? null;
+    /** A caption line as a question, with who said it and the lines before it (each with its time). */
     function questionAt(line) {
       const lines = [...document.querySelectorAll(LINE)].filter((each) => textOf(each));
       const at = lines.indexOf(line);
@@ -280,9 +284,9 @@
       let name = "";
       for (const each of lines.slice(Math.max(0, at - 6), at)) {
         name = nameOf(each) || name;
-        before.push(`${name ? `${name}: ` : ""}${textOf(each)}`);
+        before.push({ at: atOf(each), text: `${name ? `${name}: ` : ""}${textOf(each)}` });
       }
-      return { question: textOf(line), speaker, before };
+      return { question: textOf(line), at: atOf(line), speaker, before };
     }
     const captionLine = (event) => {
       const line = event.target.closest?.(LINE);
@@ -315,16 +319,40 @@
       let name = "";
       for (let i = 0; i <= lines.indexOf(chosen.at(-1)); i++) {
         name = nameOf(lines[i]) || name;
-        if (chosen.includes(lines[i])) said.push(`${name ? `${name}: ` : ""}${textOf(lines[i])}`);
+        if (chosen.includes(lines[i])) said.push({ at: atOf(lines[i]), text: `${name ? `${name}: ` : ""}${textOf(lines[i])}` });
       }
       const { before } = questionAt(chosen[0]);
-      return chosen.length === 1 ? questionAt(chosen[0]) : { question: said.join("\n"), speaker: "", before, selection: true };
+      return chosen.length === 1 ? questionAt(chosen[0]) : { question: said.map((each) => each.text).join("\n"), lines: said, speaker: "", before, selection: true };
     }
     const askIn = (x, y, question) => {
       const ask = (chosen) => showAnswer(x, y, chosen, question);
       if (session) ask(session);
       else openMenu(x, y, sessionItems(ask), "Ask Claude in");
     };
+    // Ctrl+A after a click in the side panel's captions (or with some of them selected): the captions only, not the
+    // whole window. In a text box it stays the box's own.
+    let lastDown = null;
+    document.addEventListener("mousedown", (event) => (lastDown = event.target), true);
+    document.addEventListener(
+      "keydown",
+      (event) => {
+        if (!event.ctrlKey || event.shiftKey || event.altKey || event.code !== "KeyA" || event.target.closest?.('input, textarea, [contenteditable="true"], [contenteditable=""]')) return;
+        const lines = [...document.querySelectorAll(".p-huddle_event_log__base_event")].filter((each) => textOf(each));
+        if (!lines.length) return;
+        let list = lines[0].parentElement;
+        while (list && !list.contains(lines.at(-1))) list = list.parentElement;
+        const inList = (node) => !!node && list.contains(node.nodeType === Node.TEXT_NODE ? node.parentNode : node);
+        if (!inList(getSelection()?.anchorNode) && !inList(lastDown)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const range = document.createRange();
+        range.setStartBefore(lines[0]);
+        range.setEndAfter(lines.at(-1));
+        getSelection().removeAllRanges();
+        getSelection().addRange(range);
+      },
+      true,
+    );
     // Captions selected with the mouse: an "Ask Claude" button beside them sends them all.
     let askButton = null;
     const dropAskButton = () => (askButton?.remove(), (askButton = null));
@@ -418,14 +446,14 @@
       talk = { box, log, input, title, session: chosen };
       return talk;
     }
-    function ask(where, { question, speaker = "", before = [], selection = false, typed = false }) {
+    function ask(where, { question, at = null, lines = [], speaker = "", before = [], selection = false, typed = false }) {
       const id = ++asked;
       where.log.append(el("div", "q", typed ? `You: ${question}` : `${speaker ? `${speaker}: ` : ""}${question}`));
       const text = el("div", "text", "Thinking…");
       where.log.append(text);
       where.log.scrollTop = where.log.scrollHeight;
       answers.set(id, { text, log: where.log });
-      send({ type: "ask", id, sessionId: where.session.id, question, speaker, before, selection, typed });
+      send({ type: "ask", id, sessionId: where.session.id, question, at, lines, speaker, before, selection, typed });
     }
     function showAnswer(x, y, chosen, question) {
       ask(openTalk(x, y, chosen), question);
@@ -565,6 +593,20 @@
     return readSettings().claude?.folders?.[teamId] ?? null;
   }
 
+  // A caption's time in the call's recording ("[mm:ss] ", from its start, as in the recording's transcripts and its
+  // key frames' names), so an answer can point at that moment of the video; nothing when not recording.
+  const timeIn = (recording, at) => (recording && at ? `[${clock(Math.max(0, at - recording.since))}] ` : "");
+  /** Where the call is being recorded, and how a time maps to a moment of a part's video (for frames), or "". */
+  function whereRecorded(recording) {
+    if (!recording) return "";
+    const parts = recording.parts.map((file) => `"${file}" from ${clock(Math.max(0, (recording.starts[file] ?? recording.since) - recording.since))}`);
+    return (
+      `The call is being recorded (times above are from the recording's start): ${parts.join(", ")}; a frame at a time T is in the ` +
+      "part that covers it, at T minus the part's start (ffmpeg -ss <seconds> -i <part> -frames:v 1 <file>.png). Stills of the screen " +
+      `when it changed are in "${recording.base}.frames" (named by time). Look at the screen only if the question needs it.\n`
+    );
+  }
+
   /** The folder's sessions to the huddle window (a session started from the huddle shows even before it has a name). */
   function sendSessions(contents, huddle) {
     huddle.sessions = huddle.folder ? projectSessions(huddle.folder) : [];
@@ -622,17 +664,20 @@
       if (recordings.has(contents.id)) await stopRecording(contents, false);
       else await startRecording(contents);
     } else if (message.type === "ask") {
+      const recording = recordings.get(contents.id);
       const fresh = message.sessionId === "new";
       const chosen = huddle.sessions.find((each) => each.id === message.sessionId);
       try {
         if (!fresh && !chosen) throw new Error("that session is gone");
+        const timed = (line) => `${timeIn(recording, line.at)}${line.text}`;
         const prompt = message.typed
-          ? `(Still on the Slack call; I typed this.) ${message.question}\n` +
+          ? `(Still on the Slack call; I typed this.) ${message.question}\n${whereRecorded(recording)}` +
             "Answer quickly, in a few short sentences, plain words (look at the code only if you must). Don't change anything."
           : (message.selection
-              ? `I'm on a Slack call. This part of it, from the captions:\n${message.question}\n`
-              : `I'm on a Slack call. ${message.speaker ? `${message.speaker} asked` : "Someone asked"}: "${message.question}"\n`) +
-            (message.before?.length ? `Just before that:\n${message.before.map((line) => `- ${line}`).join("\n")}\n` : "") +
+              ? `I'm on a Slack call. This part of it, from the captions:\n${(message.lines?.length ? message.lines.map(timed) : [message.question]).join("\n")}\n`
+              : `I'm on a Slack call. ${timeIn(recording, message.at)}${message.speaker ? `${message.speaker} asked` : "Someone asked"}: "${message.question}"\n`) +
+            (message.before?.length ? `Just before that:\n${message.before.map((line) => `- ${timed(line)}`).join("\n")}\n` : "") +
+            whereRecorded(recording) +
             "Give me a quick answer I can say out loud: two to four short sentences, plain words, from what you know here " +
             "(look at the code only if you must). Don't change anything.";
         // Answered by the fast model (huddle.answerModel, default the AI settings' fast model); a session too long for

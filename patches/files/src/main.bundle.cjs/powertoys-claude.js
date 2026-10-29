@@ -656,7 +656,8 @@
 
   async function askClaude({ link, teamId, kind = "message" }) {
     const prompt = (PROMPTS[kind] ?? PROMPTS.message)(link);
-    const folder = settings().folders[teamId] ?? null;
+    // As Windows writes it (E:\a\b): Claude Desktop files a session under its project by that exact path.
+    const folder = settings().folders[teamId] ? path.win32.resolve(settings().folders[teamId]) : null;
     const url = folder
       ? `claude://code/new?folder=${encodeURIComponent(folder)}&q=${encodeURIComponent(prompt)}`
       : `claude://claude.ai/new?q=${encodeURIComponent(prompt)}`;

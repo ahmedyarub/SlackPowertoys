@@ -3,6 +3,7 @@
 //
 //   - Pasting a link (Notion, GitHub, any page with a title): the link goes in at once, and its title replaces its
 //     text, linked, once known (if it is still in the message box).
+//   - Ticket IDs ("ISS-1780"), typed or pasted, become links to their Notion pages; their text stays the ID.
 //   - Secret guard: before a message goes, it is checked here (nothing leaves the computer) for things like API keys,
 //     tokens, private keys and .env lines; you can redact them, send anyway, or cancel.
 //   - Snippets: type ;; in the message box to pick one (powertoys\snippets.json; {{commits}}, {{date}}, {{ai: ...}}).
@@ -82,6 +83,87 @@
     }
     selection.removeAllRanges();
     selection.addRange(back);
+  }
+
+  // --- Ticket IDs as Notion links ---------------------------------------------------------------------------
+  // "ISS-1780" in the message box becomes a link to its Notion page (its text stays the ID): typed, once the
+  // character after it is typed; pasted, at once. An ID Notion doesn't know is left as it is.
+  let ticketPattern = null;
+  const tickets = new Map(); // ID -> its ticket (Notion), asked once
+  const ticketOf = (id) => {
+    if (!tickets.has(id)) tickets.set(id, page.invoke("ticket-info", { id }).catch((caught) => (tickets.delete(id), page.log(`tickets: ${id}: ${page.reason(caught)}`), null)));
+    return tickets.get(id);
+  };
+
+  /** The IDs in the box not linked yet: [{ node, at, id }]; one the caret is right after (still being typed) only if asked. */
+  function unlinkedTickets(editor, withCaret) {
+    const selection = getSelection();
+    const found = [];
+    const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node.parentElement.closest("a, ts-slug, code, pre")) continue;
+      for (const match of node.textContent.matchAll(ticketPattern)) {
+        const typing = selection.anchorNode === node && selection.anchorOffset === match.index + match[0].length;
+        if (withCaret || !typing) found.push({ node, at: match.index, id: match[0] });
+      }
+    }
+    return found;
+  }
+
+  // Where the caret is, as text before it, so it goes back to the same place (a link keeps the ID's text).
+  function caretOffset(editor) {
+    const selection = getSelection();
+    if (!selection.rangeCount || !editor.contains(selection.anchorNode)) return null;
+    const before = document.createRange();
+    before.setStart(editor, 0);
+    before.setEnd(selection.anchorNode, selection.anchorOffset);
+    return before.toString().length;
+  }
+  function putCaret(editor, offset) {
+    const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+    let left = offset;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (left <= node.textContent.length) {
+        const range = document.createRange();
+        range.setStart(node, left);
+        range.collapse(true);
+        getSelection().removeAllRanges();
+        getSelection().addRange(range);
+        return;
+      }
+      left -= node.textContent.length;
+    }
+  }
+
+  async function linkTickets(editor, withCaret = false) {
+    if (!ticketPattern) return;
+    const ids = [...new Set(unlinkedTickets(editor, withCaret).map((each) => each.id))];
+    if (!ids.length) return;
+    const found = new Map((await Promise.all(ids.map(async (id) => [id, await ticketOf(id)]))).filter(([, ticket]) => ticket?.url));
+    // Slack's editor takes inserted HTML in the box that has the focus; the IDs are found again, as the box is now.
+    if (!found.size || !editor.isConnected || document.activeElement !== editor) return;
+    const caret = caretOffset(editor);
+    const escape = (value) => value.replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" })[c]);
+    let linked = 0;
+    // From the last, so the places of the ones before stay right.
+    for (const { node, at, id } of unlinkedTickets(editor, withCaret).reverse()) {
+      const ticket = found.get(id);
+      if (!ticket) continue;
+      const range = document.createRange();
+      range.setStart(node, at);
+      range.setEnd(node, at + id.length);
+      getSelection().removeAllRanges();
+      getSelection().addRange(range);
+      ownPaste = true;
+      try {
+        document.execCommand("insertHTML", false, `<a href="${escape(ticket.url)}">${escape(id)}</a>`);
+      } finally {
+        ownPaste = false;
+      }
+      linked++;
+    }
+    if (caret !== null) putCaret(editor, caret);
+    if (linked) page.log(`tickets: ${linked} ID${linked > 1 ? "s" : ""} in the message box linked to Notion`);
   }
 
   // --- Secret guard ----------------------------------------------------------------------------------------
@@ -232,6 +314,11 @@
   exports.start = function start(core) {
     page = core;
     document.addEventListener("paste", (event) => onPaste(event).catch((caught) => page.log(`paste: ${caught.message}`)), true);
+    // After Slack has put the pasted text in.
+    document.addEventListener("paste", (event) => {
+      const editor = editorOf(event.target);
+      if (editor && !ownPaste) setTimeout(() => linkTickets(editor, true).catch((caught) => page.log(`tickets: ${caught.message}`)), 50);
+    });
     document.addEventListener(
       "keydown",
       (event) => {
@@ -261,13 +348,21 @@
       "input",
       (event) => {
         const editor = editorOf(event.target);
-        if (!editor || event.data !== ";") return;
+        if (!editor) return;
+        // A character that ends an ID (not a digit), or a new line.
+        if (!ownPaste && ((event.inputType === "insertText" && !/^\d+$/.test(event.data ?? "")) || /^insert(Paragraph|LineBreak)$/.test(event.inputType))) {
+          linkTickets(editor).catch((caught) => page.log(`tickets: ${caught.message}`));
+        }
+        if (event.data !== ";") return;
         const selection = getSelection();
         const node = selection?.anchorNode;
         if (node?.nodeType === 3 && node.textContent.slice(0, selection.anchorOffset).endsWith(";;")) offerSnippets(editor);
       },
       true,
     );
+    page.invoke("settings")
+      .then((s) => s.ticketPrefix && (ticketPattern = new RegExp(`\\b${s.ticketPrefix.replace(/\W/g, "")}-\\d+\\b`, "g")))
+      .catch(() => {});
     page.log("message box features started");
   };
 });
