@@ -13,9 +13,8 @@
 // captions side-by-side view" in every store that doesn't have it yet, the Captions tab is selected, and the overlay is
 // turned off. Slack's own default turning the overlay on (with side-by-side, when the call's audio connects) is dropped
 // in the store's dispatch, so the captions menu shows side-by-side only; turning the overlay on from the menu still
-// works. Failing that, it is turned off if it comes on in the huddle's first 30 s (a store can keep side-by-side on from the
-// last huddle, and then nothing flips for the watcher to act on). During a call the huddle's state is in Slack's client
-// store (it reaches the workspace's store only when the call ends), so that store is watched and set too.
+// works; an overlay that comes on in the huddle's first 30 s otherwise is turned off (a store can keep side-by-side on from the
+// last huddle, and then nothing flips for the watcher to act on).
 // Slack's "Heads up — AI notes are on" notice, shown to who joins a huddle with AI notes on, is closed as its "Got It"
 // does: taken out of Slack's open modals (its modal store), and the store told. The notice the one who starts AI notes
 // gets ("Everyone ready to start AI notes?", Start or Cancel) stays.
@@ -66,9 +65,6 @@
         sideBySide: creator(captions, "Set enabled state for huddle captions side-by-side view"),
         selectTab: creator(tabs, "Set selected tab"),
         dispatchForClient: exported(client, (value) => value.name === "dispatchForClientStore"),
-        // The client store: during a call (4.53) the huddle's state is there, and reaches the workspace's store only
-        // when the call ends.
-        clientStore: exported(client, (value) => value.name === "tryGetClientStoreInstance"),
         // The open modals, by workspace and window, and the action that tells the store they changed.
         openModals: Object.values(modals ?? {}).find((value) => value?.constructor === Object),
         modalsChanged: creator(modals, "Open a modal"),
@@ -79,12 +75,11 @@
       return missing.length ? null : parts;
     }
 
-    // The workspaces' stores (by team id) and the client store: [label, store].
-    const labelledStores = () => {
+    // The stores of the workspaces and the enterprise (Slack's store map, by team or enterprise id).
+    const allStores = () => {
       const map = found.storeMap();
-      return [...(map instanceof Map ? map.entries() : Object.entries(map ?? {})), ["client", found.clientStore()]].filter(([, store]) => store);
+      return (map instanceof Map ? [...map.values()] : Object.values(map ?? {})).filter(Boolean);
     };
-    const allStores = () => labelledStores().map(([, store]) => store);
     const watched = new WeakSet();
     let huddleStartedAt = 0; // when the last huddle window showed
     function watch() {
@@ -170,20 +165,6 @@
         store.dispatch(tab);
       }
       say(`captions: a huddle started; the side panel shows Captions (side-by-side turned on in ${turned}, overlay turned off in ${overlays} of the stores)`);
-      // In case the overlay comes on some other way than through a store's dispatch (where guardDispatch stops it): for
-      // the huddle's first 30 s every store is read four times a second, and an overlay on is turned off at once
-      // (logged once per store, with when: a sign the drop missed).
-      const caught = new Set();
-      const poll = setInterval(() => {
-        const since = (Date.now() - huddleStartedAt) / 1000;
-        if (since > 30) return clearInterval(poll);
-        for (const [label, store] of labelledStores()) {
-          if (!store.getState?.()?.huddleEvents?.isClosedCaptionsEnabled) continue;
-          store.dispatch(found.closedCaptions(false));
-          if (!caught.has(label)) say(`captions: the overlay came on (${label}) ${since.toFixed(1)} s in without passing the drop; turned off`);
-          caught.add(label);
-        }
-      }, 250);
     });
 
     // Slack's modules arrive as its code loads: looked for every 2 s for 3 minutes; the stores, then every 10 s.
