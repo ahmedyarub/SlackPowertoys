@@ -15,9 +15,10 @@
 //   - a question asked of you (someone says your first name and asks, or anyone asks in a huddle of just the two of
 //     you), once fully asked, goes into that same conversation and its answer shows in the pop-up ("huddle":
 //     { "autoAnswer": false } turns it off);
-//   - "Follow" (off until clicked): the call's finished lines go into that conversation every 20 s, and Claude says
-//     something only when something needs correcting or saying (else NOTHING, which shows nothing), handing deep
-//     investigations to an Opus subagent; everything goes through Claude Desktop, never `claude -p`;
+//   - "Follow" (off until clicked): the call's finished lines go into that conversation every 20 s on Haiku, and Claude
+//     says something only when something needs correcting or saying (else NOTHING, which shows nothing); what needs a
+//     deep investigation goes to the same conversation on Opus; everything goes through Claude Desktop (queuePrompt
+//     with a model for the turn), never `claude -p`;
 //   - the Brief and the answers' pop-up are dragged by their title bars; Ctrl+A after a click in the captions selects
 //     the caption lines only; Slack can't be quit during a huddle (powertoys/main holds it, with a dialog).
 // Each huddle is recorded to a file (the window, the call's sound, your microphone); when it ends, a notification says
@@ -831,7 +832,9 @@
         // Asked by you, or a question asked of you heard in the captions: into the Claude Desktop conversation itself
         // (queued, sent when its turn is over; with no session, a new conversation opens with it), never `claude -p`;
         // its answer, read back from the conversation, shows here.
-        const answer = await inConversation(contents, huddle, target, prompt, message.question, (note) => reply(contents, { type: "answer", id: message.id, answer: note, pending: true }));
+        // A question asked of you runs on the fast model (huddle.answerModel, default Haiku); yours on the conversation's.
+        const model = message.quick ? readSettings().huddle?.answerModel || ai.fastModel() : null;
+        const answer = await inConversation(contents, huddle, target, prompt, message.question, (note) => reply(contents, { type: "answer", id: message.id, answer: note, pending: true }), { model });
         reply(contents, { type: "answer", id: message.id, answer });
         // The list again: a new session's name, once Claude has given it one.
         sendSessions(contents, huddle);
@@ -864,15 +867,18 @@
     return chosen;
   }
 
-  /** A prompt into a Claude Desktop conversation (null: a new one), and its reply read back from its transcript -> text. */
-  async function inConversation(contents, huddle, target, prompt, probe, onSent = () => {}, timeoutMs = 300000) {
+  /**
+   * A prompt into a Claude Desktop conversation (null: a new one), on `model` for that turn if given, without bringing
+   * it forward, and its reply read back from its transcript -> text.
+   */
+  async function inConversation(contents, huddle, target, prompt, probe, onSent = () => {}, { model = null, timeoutMs = 300000 } = {}) {
     const sessionId = target?.id ?? null;
     // Its transcript is in its own folder's project (a worktree's sessions have their own).
     const where = target?.cwd ?? huddle.folder;
     const file = sessionId ? path.join(projectsDir(), where.replace(/[:\\/.]/g, "-"), `${sessionId}.jsonl`) : null;
     const offset = file && fs.existsSync(file) ? fs.statSync(file).size : 0;
     const since = Date.now();
-    const sent = await __webpack_require__("powertoys/assist").toClaude({ prompt, folder: huddle.folder, sessionId });
+    const sent = await __webpack_require__("powertoys/assist").toClaude({ prompt, folder: huddle.folder, sessionId, model, focus: false });
     if (sent.clipboard) throw new Error(`Claude Desktop couldn't queue it: "${sent.session}" is open there with the prompt on the clipboard, to paste`);
     onSent(`Sent to ${target ? `"${target.title}"` : "a new conversation"} in Claude Desktop; its answer shows here…`);
     // A new conversation: by the id Claude Desktop gave back (else the transcript made since that has the prompt).
@@ -884,9 +890,10 @@
     return found.text;
   }
 
-  // "Follow": while it is on, the call's finished lines go to the conversation every 20 s or so, and Claude answers only
-  // when something said needs correcting or something should be said now (else exactly NOTHING, which shows nothing).
-  // A deep investigation it hands to an Opus subagent. Everything goes through the conversation in Claude Desktop.
+  // "Follow": while it is on, the call's finished lines go to the conversation every 20 s or so, on the fast model
+  // (Haiku), and Claude answers only when something said needs correcting or something should be said now (else exactly
+  // NOTHING, which shows nothing). What needs a deep investigation it names (DEEP: …), and that goes to the same
+  // conversation on Opus (huddle.deepModel). Everything goes through the conversation in Claude Desktop.
   async function follow(contents, huddle) {
     const state = huddle.follow;
     state.busy = true;
@@ -900,14 +907,28 @@
         const prompt =
           `(Following my Slack call for me${huddle.me ? `; I am ${huddle.me}` : ""}. New lines from the captions:)\n${said}\n\n` +
           "Reply only if something said needs correcting (a wrong fact about our code, data, tickets or decisions) or something " +
-          "important should be said now. Otherwise reply with exactly NOTHING. If it needs a deep investigation first (reading " +
-          'code, logs or data), hand that to a subagent on Opus (the Agent tool, model "opus") and reply with what it finds. Keep ' +
-          "any reply to two or three short sentences I can say out loud. Don't change anything.";
-        const answer = await inConversation(contents, huddle, target, prompt, lines[0].text, () => {}, 600000).catch((caught) => (warn(`follow: ${caught.message}`), null));
+          "important should be said now. Otherwise reply with exactly NOTHING. If saying it needs a deep investigation first " +
+          "(reading code, logs or data), reply with exactly DEEP: and what to look into, and nothing else. Keep any other reply " +
+          "to two or three short sentences I can say out loud. Don't change anything.";
+        const answer = await inConversation(contents, huddle, target, prompt, lines[0].text, () => {}, { model: readSettings().huddle?.followModel || ai.fastModel() }).catch((caught) => (warn(`follow: ${caught.message}`), null));
         if (!target && huddle.session) Object.assign(state, { sessionId: huddle.session.id, cwd: huddle.folder, title: huddle.session.title });
         else if (target) Object.assign(state, { sessionId: target.id, cwd: target.cwd, title: target.title });
-        if (answer && !/^\s*NOTHING\b/i.test(answer)) reply(contents, { type: "follow-answer", text: answer });
-        log(`follow: ${lines.length} line${lines.length === 1 ? "" : "s"} sent; ${answer ? (/^\s*NOTHING\b/i.test(answer) ? "nothing to say" : "Claude spoke up") : "no answer"}`);
+        const deep = /^\s*DEEP:\s*([\s\S]+)/i.exec(answer ?? "")?.[1]?.trim();
+        if (deep) {
+          // The investigation, on Opus in the same conversation (lines that come in meanwhile wait for it).
+          reply(contents, { type: "follow-answer", text: `Looking into it (Opus): ${deep}` });
+          const found = await inConversation(
+            contents,
+            huddle,
+            { id: state.sessionId, cwd: state.cwd, title: state.title },
+            `(From my Slack call) Look into this now: ${deep}\nRead the code, logs or data you need, then answer in two or three short sentences I can say on the call. Don't change anything.`,
+            deep.slice(0, 60),
+            () => {},
+            { model: readSettings().huddle?.deepModel || "opus", timeoutMs: 900000 },
+          ).catch((caught) => (warn(`follow: the investigation: ${caught.message}`), null));
+          if (found) reply(contents, { type: "follow-answer", text: found });
+        } else if (answer && !/^\s*NOTHING\b/i.test(answer)) reply(contents, { type: "follow-answer", text: answer });
+        log(`follow: ${lines.length} line${lines.length === 1 ? "" : "s"} sent; ${deep ? "a deep investigation on Opus" : answer ? (/^\s*NOTHING\b/i.test(answer) ? "nothing to say" : "Claude spoke up") : "no answer"}`);
       }
     } finally {
       state.busy = false;

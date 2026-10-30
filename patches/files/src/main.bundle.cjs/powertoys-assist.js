@@ -104,9 +104,10 @@
   /**
    * A prompt for Claude Code: into an existing session of the folder (Claude Desktop queues it, or it opens with the
    * prompt on the clipboard), or, with no session, a new one started in Claude Desktop -> { folder, session?, queued?,
-   * clipboard?, newSessionId? }.
+   * clipboard?, newSessionId? }. `model` ("haiku", "opus", …) runs that one turn on it (the conversation's own model
+   * otherwise, or if Claude Desktop refuses it); with `focus` false the conversation isn't brought forward.
    */
-  async function toClaude({ prompt, folder, sessionId }) {
+  async function toClaude({ prompt, folder, sessionId, model = null, focus = true }) {
     if (!sessionId) return { folder, newSessionId: await openClaude(prompt, folder) };
     const session = __webpack_require__("powertoys/huddle").projectSessions(folder).find((each) => each.id === sessionId);
     if (!session) throw new Error("that Claude Code session is gone");
@@ -114,10 +115,17 @@
     // open there doesn't show turns added by another process, and two writers on one transcript is unsafe):
     // Claude Desktop's Powertoys queue it (command-request.json: it is sent when the session's turn is over), or,
     // with a Claude Desktop that can't, the session opens with the share on the clipboard, to paste and send.
-    const queued = await desktopCommand({ command: "queuePrompt", cliSessionId: sessionId, text: prompt }).catch((caught) => (log(`share: Claude Desktop didn't queue it (${caught.message})`), null));
-    await electron.shell.openExternal(`claude://resume?session=${encodeURIComponent(sessionId)}`);
+    const queue = (withModel) => desktopCommand({ command: "queuePrompt", cliSessionId: sessionId, text: prompt, ...(withModel ? { model: withModel } : {}) });
+    const queued = await queue(model)
+      .catch((caught) => {
+        if (!model) throw caught;
+        log(`share: Claude Desktop didn't take the model ${model} (${caught.message}); queued with the conversation's own`);
+        return queue(null);
+      })
+      .catch((caught) => (log(`share: Claude Desktop didn't queue it (${caught.message})`), null));
+    if (focus || !queued) await electron.shell.openExternal(`claude://resume?session=${encodeURIComponent(sessionId)}`);
     if (queued) {
-      log(`shared into session ${sessionId} (${session.title}): queued in Claude Desktop`);
+      log(`shared into session ${sessionId} (${session.title}): queued in Claude Desktop${queued.model ? ` (${queued.model})` : ""}`);
       return { folder, session: session.title, queued: true };
     }
     electron.clipboard.writeText(prompt);

@@ -79,7 +79,8 @@ patches/files/...           files that are entirely new (written for Powertoys),
   follow-up questions in. A question someone asks you by name (or any question, when it's just the two of you) goes
   to that conversation as soon as it has been fully asked, and its answer shows in the same pop-up. **Follow** (off
   until you click it) sends the call's finished sentences to that conversation as it goes, and Claude speaks up only
-  when something needs correcting or saying, handing deep investigations to an Opus subagent. The Brief can be dragged too, and Slack can't be quit during a
+  when something needs correcting or saying. Those checks run on Haiku; anything that needs a deep investigation goes
+  to the same conversation on Opus. The Brief can be dragged too, and Slack can't be quit during a
   huddle. While the call is recorded, the caption lines go with their time in the recording,
   so Claude can look at the screen at that moment. Ctrl+A in the captions selects only the captions. From the moment a huddle rings or its start screen opens, Bluetooth goes on and
   Windows connects your paired
