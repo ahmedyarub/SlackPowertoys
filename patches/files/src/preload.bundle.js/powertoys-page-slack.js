@@ -8,6 +8,11 @@
 // creators "Set enabled state for huddle closed captions view" and "Set selected tab". It watches the stores: when
 // side-by-side comes on, the Captions tab is selected; when the overlay comes on with it (within 2 s: Slack's join
 // default), it is turned off. The overlay turned on later from the menu stays. Nothing is clicked.
+// Slack 4.53 no longer turns side-by-side on at once when you join (in one huddle, only when it ended), so when a huddle
+// window shows (powertoys/huddle tells the page) side-by-side is turned on with Slack's own "Set enabled state for huddle
+// captions side-by-side view", in every store that doesn't have it yet; the watcher above then selects the Captions tab.
+// During a call the huddle's state is in Slack's client store (it reaches the workspace's store only when the call
+// ends), so that store is watched and set too.
 // Slack's "Heads up — AI notes are on" notice, shown to who joins a huddle with AI notes on, is closed as its "Got It"
 // does: taken out of Slack's open modals (its modal store), and the store told. The notice the one who starts AI notes
 // gets ("Everyone ready to start AI notes?", Start or Cancel) stays.
@@ -55,8 +60,12 @@
       const parts = {
         storeMap: exported(stores, (value) => value.name === "getStoreInstanceMap"),
         closedCaptions: creator(captions, "Set enabled state for huddle closed captions view"),
+        sideBySide: creator(captions, "Set enabled state for huddle captions side-by-side view"),
         selectTab: creator(tabs, "Set selected tab"),
         dispatchForClient: exported(client, (value) => value.name === "dispatchForClientStore"),
+        // The client store: during a call (4.53) the huddle's state is there, and reaches the workspace's store only
+        // when the call ends.
+        clientStore: exported(client, (value) => value.name === "tryGetClientStoreInstance"),
         // The open modals, by workspace and window, and the action that tells the store they changed.
         openModals: Object.values(modals ?? {}).find((value) => value?.constructor === Object),
         modalsChanged: creator(modals, "Open a modal"),
@@ -67,10 +76,14 @@
       return missing.length ? null : parts;
     }
 
+    // The workspaces' stores and the client store.
+    const allStores = () => {
+      const map = found.storeMap();
+      return [...(map instanceof Map ? map.values() : Object.values(map ?? {})), found.clientStore()].filter(Boolean);
+    };
     const watched = new WeakSet();
     function watch() {
-      const map = found.storeMap();
-      for (const store of map instanceof Map ? map.values() : Object.values(map ?? {})) {
+      for (const store of allStores()) {
         if (!store?.subscribe || watched.has(store)) continue;
         watched.add(store);
         let last = store.getState()?.huddleEvents ?? {};
@@ -111,6 +124,19 @@
       }
     }
 
+    // A huddle window showed: side-by-side captions on where they aren't.
+    document.addEventListener("powertoys:slack-command", (event) => {
+      if (event.detail !== "captions-on" || !found) return;
+      let turned = 0;
+      for (const store of allStores()) {
+        const events = store?.getState?.()?.huddleEvents;
+        if (!events || events.isSideBySideEnabled) continue;
+        store.dispatch(found.sideBySide(true));
+        turned++;
+      }
+      say(turned ? `captions: a huddle started; side-by-side captions turned on (${turned} store${turned === 1 ? "" : "s"})` : "captions: a huddle started; side-by-side captions were already on");
+    });
+
     // Slack's modules arrive as its code loads: looked for every 2 s for 3 minutes; the stores, then every 10 s.
     let tries = 0;
     const look = setInterval(() => {
@@ -133,6 +159,7 @@
 
   exports.hookSlack = function hookSlack() {
     document.addEventListener("powertoys:slack-log", (event) => electron.ipcRenderer.send("powertoys:log", String(event.detail)));
+    electron.ipcRenderer.on("powertoys:huddle-started", () => document.dispatchEvent(new CustomEvent("powertoys:slack-command", { detail: "captions-on" })));
     electron.webFrame.executeJavaScript(`(${slackHook.toString()})()`).catch((caught) => electron.ipcRenderer.send("powertoys:log", `captions: the page script failed: ${caught.message}`));
   };
 });

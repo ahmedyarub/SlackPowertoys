@@ -1107,6 +1107,8 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     huddles.set(contents.id, { folder: currentFolder(), session: null, sessions: [], created: new Set() });
     keepBluetooth();
     maximize(contents, "the huddle");
+    // Side-by-side captions on, in Slack's page (powertoys/page-slack), which then shows the Captions tab.
+    slackPage()?.send("powertoys:huddle-started");
     headphonesOn("started").catch((caught) => warn(`headphones: ${caught.message}`));
     await contents.executeJavaScript(`(${huddleWindowScript.toString()})()`, true);
     log(`huddle window: Claude added (folder ${huddles.get(contents.id)?.folder ?? "none"})`);
