@@ -51,13 +51,28 @@
   /** The folder Claude Code works in for a workspace (claude.folders), if any. */
   const folderOf = (teamId) => readSettings().claude?.folders?.[teamId] ?? null;
 
-  // The folder as Windows writes it (E:\a\b): Claude Desktop files a session under its project by that exact path, and
-  // claude.folders may say E:/a/b.
-  function openClaude(prompt, folder) {
+  /**
+   * A new Code session in the folder with the prompt sent, in claude.permissionMode (default auto): Claude Desktop's
+   * Powertoys start it (newSession) and give back its id. With `prefill` (a start for you to finish, like a snippet),
+   * when that fails, or with no folder (a chat), a claude:// link opens it with the prompt in the box instead.
+   * The folder goes as Windows writes it (E:\a\b): Claude Desktop files a session under its project by that path.
+   * -> the new session's CLI id, when Claude Desktop gave it.
+   */
+  async function openClaude(prompt, folder, { prefill = false } = {}) {
     if (folder) folder = path.win32.resolve(folder);
+    if (folder && !prefill) {
+      const permissionMode = readSettings().claude?.permissionMode ?? "auto";
+      const started = await desktopCommand({ command: "newSession", folder, text: prompt, permissionMode }).catch((caught) => (log(`new session: Claude Desktop didn't start it (${caught.message}); opening it by link`), null));
+      if (started?.cliSessionId) {
+        log(`new session ${started.cliSessionId} in ${folder} (${permissionMode})`);
+        return started.cliSessionId;
+      }
+    }
     const url = folder ? `claude://code/new?folder=${encodeURIComponent(folder)}&q=${encodeURIComponent(prompt)}` : `claude://claude.ai/new?q=${encodeURIComponent(prompt)}`;
-    return electron.shell.openExternal(url);
+    await electron.shell.openExternal(url);
+    return null;
   }
+  exports.openClaude = openClaude;
 
   /**
    * A command for Claude Desktop's Powertoys: its folder (%APPDATA%\Claude\powertoys) is watched for
@@ -87,14 +102,11 @@
 
   /**
    * A prompt for Claude Code: into an existing session of the folder (Claude Desktop queues it, or it opens with the
-   * prompt on the clipboard), or, with no session, a new one opened in Claude Desktop -> { folder, session?, queued?,
-   * clipboard? }.
+   * prompt on the clipboard), or, with no session, a new one started in Claude Desktop -> { folder, session?, queued?,
+   * clipboard?, newSessionId? }.
    */
   async function toClaude({ prompt, folder, sessionId }) {
-    if (!sessionId) {
-      await openClaude(prompt, folder);
-      return { folder };
-    }
+    if (!sessionId) return { folder, newSessionId: await openClaude(prompt, folder) };
     const session = __webpack_require__("powertoys/huddle").projectSessions(folder).find((each) => each.id === sessionId);
     if (!session) throw new Error("that Claude Code session is gone");
     // The share goes into the session as a real message in Claude Desktop, never written behind its back (a session
@@ -614,7 +626,7 @@
     "open-snippet": ({ code }) => dev.openSnippet(code, languageOf(code)),
     "run-command": ({ code, teamId }, event) => dev.runInTerminal(code.replace(/^\$ /gm, ""), folderOf(teamId) ?? dev.folders(teamId)[0], electron.BrowserWindow.fromWebContents(event.sender)),
     gist: ({ code }, event) => dev.createGist(code, languageOf(code), electron.BrowserWindow.fromWebContents(event.sender)),
-    "send-to-code": ({ code, link, teamId }) => openClaude(`Here is a snippet from Slack${link ? ` (${link})` : ""}:\n\n\`\`\`\n${code}\n\`\`\`\n\n`, folderOf(teamId)).then(() => ({ ok: true })),
+    "send-to-code": ({ code, link, teamId }) => openClaude(`Here is a snippet from Slack${link ? ` (${link})` : ""}:\n\n\`\`\`\n${code}\n\`\`\`\n\n`, folderOf(teamId), { prefill: true }).then(() => ({ ok: true })),
     "github-info": (url) => dev.githubInfo(url),
     "open-in-slack": openInSlack,
     "review-pull": reviewPull,

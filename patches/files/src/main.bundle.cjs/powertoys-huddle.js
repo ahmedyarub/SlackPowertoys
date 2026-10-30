@@ -806,7 +806,8 @@
           const sent = await __webpack_require__("powertoys/assist").toClaude({ prompt, folder: huddle.folder, sessionId });
           if (sent.clipboard) throw new Error(`Claude Desktop couldn't queue it: "${sent.session}" is open there with the question on the clipboard, to paste`);
           reply(contents, { type: "answer", id: message.id, answer: "Sent to the conversation in Claude Desktop; its answer shows here…", pending: true });
-          const found = await answerFrom({ folder: huddle.folder, sessionId, probe: message.question, offset, since });
+          // A new conversation: by the id Claude Desktop gave back (else the transcript made since that has the question).
+          const found = await answerFrom({ folder: huddle.folder, sessionId: sessionId ?? sent.newSessionId ?? null, probe: message.question, offset: sessionId ? offset : 0, since });
           answer = found.text;
           if (!sessionId && found.sessionId) {
             huddle.created.add(found.sessionId);

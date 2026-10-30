@@ -656,12 +656,9 @@
 
   async function askClaude({ link, teamId, kind = "message" }) {
     const prompt = (PROMPTS[kind] ?? PROMPTS.message)(link);
-    // As Windows writes it (E:\a\b): Claude Desktop files a session under its project by that exact path.
-    const folder = settings().folders[teamId] ? path.win32.resolve(settings().folders[teamId]) : null;
-    const url = folder
-      ? `claude://code/new?folder=${encodeURIComponent(folder)}&q=${encodeURIComponent(prompt)}`
-      : `claude://claude.ai/new?q=${encodeURIComponent(prompt)}`;
-    await electron.shell.openExternal(url);
+    // A new session in the linked folder (auto mode, the prompt sent), else a chat (powertoys/assist).
+    const folder = settings().folders[teamId] ?? null;
+    await __webpack_require__("powertoys/assist").openClaude(prompt, folder);
     log(`asked Claude about a ${kind} (${folder ? "Code session in the linked folder" : "chat"})`);
     return { folder };
   }
