@@ -10,9 +10,10 @@
 // default), it is turned off. The overlay turned on later from the menu stays. Nothing is clicked.
 // Slack 4.53 no longer turns side-by-side on at once when you join (in one huddle, only when it ended), so when a huddle
 // window shows (powertoys/huddle tells the page) side-by-side is turned on with Slack's own "Set enabled state for huddle
-// captions side-by-side view", in every store that doesn't have it yet; the watcher above then selects the Captions tab.
-// During a call the huddle's state is in Slack's client store (it reaches the workspace's store only when the call
-// ends), so that store is watched and set too.
+// captions side-by-side view" in every store that doesn't have it yet, the Captions tab is selected, and the overlay is
+// turned off, then and when Slack turns it on in the huddle's first 5 s (a store can keep side-by-side on from the
+// last huddle, and then nothing flips for the watcher to act on). During a call the huddle's state is in Slack's client
+// store (it reaches the workspace's store only when the call ends), so that store is watched and set too.
 // Slack's "Heads up — AI notes are on" notice, shown to who joins a huddle with AI notes on, is closed as its "Got It"
 // does: taken out of Slack's open modals (its modal store), and the store told. The notice the one who starts AI notes
 // gets ("Everyone ready to start AI notes?", Start or Cancel) stays.
@@ -82,6 +83,7 @@
       return [...(map instanceof Map ? map.values() : Object.values(map ?? {})), found.clientStore()].filter(Boolean);
     };
     const watched = new WeakSet();
+    let huddleStartedAt = 0; // when the last huddle window showed
     function watch() {
       for (const store of allStores()) {
         if (!store?.subscribe || watched.has(store)) continue;
@@ -105,7 +107,8 @@
             found.dispatchForClient(tab);
             say("captions: side-by-side on; the side panel shows Captions");
           }
-          if (now.isClosedCaptionsEnabled && !before.isClosedCaptionsEnabled && Date.now() - sideBySideAt < 2000) {
+          // Slack's join default: on with side-by-side, or in the first seconds of a huddle (later, it was you).
+          if (now.isClosedCaptionsEnabled && !before.isClosedCaptionsEnabled && Date.now() - Math.max(sideBySideAt, huddleStartedAt) < 5000) {
             store.dispatch(found.closedCaptions(false));
             say("captions: the overlay Slack turned on with them is off (side-by-side only)");
           }
@@ -124,17 +127,22 @@
       }
     }
 
-    // A huddle window showed: side-by-side captions on where they aren't.
+    // A huddle window showed: side-by-side captions on where they aren't, the overlay off where it is, and the
+    // Captions tab, whatever side-by-side was already (a store keeps it from the last huddle, and then nothing flips).
     document.addEventListener("powertoys:slack-command", (event) => {
       if (event.detail !== "captions-on" || !found) return;
+      huddleStartedAt = Date.now();
       let turned = 0;
+      let overlays = 0;
+      const tab = found.selectTab({ selectedTab: "captions" });
       for (const store of allStores()) {
         const events = store?.getState?.()?.huddleEvents;
-        if (!events || events.isSideBySideEnabled) continue;
-        store.dispatch(found.sideBySide(true));
-        turned++;
+        if (!events) continue;
+        if (!events.isSideBySideEnabled) (store.dispatch(found.sideBySide(true)), turned++);
+        if (events.isClosedCaptionsEnabled) (store.dispatch(found.closedCaptions(false)), overlays++);
+        store.dispatch(tab);
       }
-      say(turned ? `captions: a huddle started; side-by-side captions turned on (${turned} store${turned === 1 ? "" : "s"})` : "captions: a huddle started; side-by-side captions were already on");
+      say(`captions: a huddle started; the side panel shows Captions (side-by-side turned on in ${turned}, overlay turned off in ${overlays} of the stores)`);
     });
 
     // Slack's modules arrive as its code loads: looked for every 2 s for 3 minutes; the stores, then every 10 s.
