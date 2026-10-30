@@ -553,6 +553,13 @@
         text: `captions: none new for ${Math.round((Date.now() - lastCaptionAt) / 60000)} min; side panel tab "${tab}", list lines ${document.querySelectorAll(".p-huddle_event_log__base_event").length}, overlay lines ${document.querySelectorAll(".p-huddle_closed_caption_event__wrapper").length}, "Captions are being generated" ${/captions are being generated/i.test(document.body.innerText) ? "shown" : "not shown"}`,
       });
     }, 120000);
+    // What the window shows of the captions 5 s and 20 s in (the overlay's lines, the side panel's, its tab), for the log.
+    for (const seconds of [5, 20]) {
+      setTimeout(() => {
+        const tab = [...document.querySelectorAll('[data-qa="tabs_item"]')].find((each) => each.getAttribute("aria-selected") === "true")?.textContent.trim() ?? "none";
+        send({ type: "log", text: `captions: ${seconds} s in, the window shows overlay lines ${document.querySelectorAll(".p-huddle_closed_caption_event__wrapper").length}, side-panel lines ${document.querySelectorAll(".p-huddle_event_log__base_event").length}, tab "${tab}"` });
+      }, seconds * 1000);
+    }
     const lastLines = (count) => {
       let name = "";
       const said = [];

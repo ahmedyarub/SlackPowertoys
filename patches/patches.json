@@ -247,7 +247,7 @@
   {
    "path": "src/main.bundle.cjs/powertoys-huddle.js",
    "kind": "add",
-   "sha256": "8cbd8c9ff560908f50312fe58c5348414cfcedd987e502fce1d7476b65964330"
+   "sha256": "460de5186fa2ca5feeba670c347d1b1a653ef628598f9ff50ccf464e81e50f0e"
   },
   {
    "path": "src/main.bundle.cjs/powertoys-main.js",
@@ -424,7 +424,7 @@
   {
    "path": "src/preload.bundle.js/powertoys-page-slack.js",
    "kind": "add",
-   "sha256": "e4660782a9ae9c9a8459603f4b58a1fddf9c58b93fc9bef40738e93ed11d085c"
+   "sha256": "0ca978160c24f4b7370a572ecc38d7ff87235a220ca5c4ab88d3645828c6dc71"
   },
   {
    "path": "src/preload.bundle.js/powertoys-page.js",

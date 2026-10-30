@@ -77,11 +77,12 @@
       return missing.length ? null : parts;
     }
 
-    // The workspaces' stores and the client store.
-    const allStores = () => {
+    // The workspaces' stores (by team id) and the client store: [label, store].
+    const labelledStores = () => {
       const map = found.storeMap();
-      return [...(map instanceof Map ? map.values() : Object.values(map ?? {})), found.clientStore()].filter(Boolean);
+      return [...(map instanceof Map ? map.entries() : Object.entries(map ?? {})), ["client", found.clientStore()]].filter(([, store]) => store);
     };
+    const allStores = () => labelledStores().map(([, store]) => store);
     const watched = new WeakSet();
     let huddleStartedAt = 0; // when the last huddle window showed
     function watch() {
@@ -147,6 +148,20 @@
         store.dispatch(tab);
       }
       say(`captions: a huddle started; the side panel shows Captions (side-by-side turned on in ${turned}, overlay turned off in ${overlays} of the stores)`);
+      // Slack turns the overlay on once the call's audio is connected; whatever store it lands in, it goes off within
+      // these checks, and the log says where each store stood.
+      for (const seconds of [3, 8, 15, 30]) {
+        setTimeout(() => {
+          const states = [];
+          for (const [label, store] of labelledStores()) {
+            const events = store.getState?.()?.huddleEvents;
+            if (!events) continue;
+            states.push(`${label}: side-by-side ${events.isSideBySideEnabled ? "on" : "off"}, overlay ${events.isClosedCaptionsEnabled ? "on" : "off"}`);
+            if (events.isClosedCaptionsEnabled) store.dispatch(found.closedCaptions(false));
+          }
+          say(`captions: ${seconds} s in: ${states.join("; ") || "no store has the huddle's captions"}${states.some((each) => each.endsWith("overlay on")) ? " (overlays turned off)" : ""}`);
+        }, seconds * 1000);
+      }
     });
 
     // Slack's modules arrive as its code loads: looked for every 2 s for 3 minutes; the stores, then every 10 s.
