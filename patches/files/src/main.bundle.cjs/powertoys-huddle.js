@@ -7,12 +7,13 @@
 //   - a "Claude session" dropdown, always in view (in the Captions list's header), picks one of the Claude Code
 //     sessions of the workspace's folder (Claude Desktop's or the CLI's, worktrees included, from ~/.claude/projects),
 //     or "(New session)", the default, started with the first question;
-//   - double-click a caption (or right-click it, "Ask Claude", or select several, or type): the question goes into that
-//     conversation in Claude Desktop (queued there; with "(New session)", a new conversation opens with it), and its
+//   - double-click a caption (or right-click it, "Ask Claude", or select several, or type): the question goes into the
+//     conversation selected in Claude Desktop when it is one of the workspace folder's (its worktrees' too), else into
+//     the dropdown's (queued there; with "(New session)", a new conversation opens with it), and its
 //     answer, read back from the conversation, shows in a pop-up; while recording, its caption lines carry their time
 //     in the recording, with where the video is, so the session can take a frame at that moment;
 //   - a question asked of you (someone says your first name and asks), once fully asked, is answered at once by the
-//     fast model (Haiku) in the chosen session, in the pop-up ("huddle": { "autoAnswer": false } turns it off);
+//     fast model (Haiku) in that same session, in the pop-up ("huddle": { "autoAnswer": false } turns it off);
 //   - the Brief and the answers' pop-up are dragged by their title bars; Ctrl+A after a click in the captions selects
 //     the caption lines only; Slack can't be quit during a huddle (powertoys/main holds it, with a dialog).
 // Each huddle is recorded to a file (the window, the call's sound, your microphone); when it ends, a notification says
@@ -772,8 +773,14 @@
       else await startRecording(contents);
     } else if (message.type === "ask") {
       const recording = recordings.get(contents.id);
-      const fresh = message.sessionId === "new";
-      const chosen = huddle.sessions.find((each) => each.id === message.sessionId);
+      const assist = __webpack_require__("powertoys/assist");
+      // The conversation selected in Claude Desktop, when it is one of this workspace's folder (or of its worktrees);
+      // else the one chosen in the huddle's dropdown.
+      const selected = huddle.folder ? await assist.desktopCommand({ command: "selectedSession" }).catch(() => null) : null;
+      const inFolder = (cwd) => path.win32.resolve(cwd).toLowerCase().startsWith(path.win32.resolve(huddle.folder).toLowerCase());
+      const fromDesktop = selected?.cliSessionId && selected.cwd && inFolder(selected.cwd) ? { id: selected.cliSessionId, cwd: selected.cwd, title: selected.title } : null;
+      const fresh = !fromDesktop && message.sessionId === "new";
+      const chosen = fromDesktop ?? huddle.sessions.find((each) => each.id === message.sessionId);
       try {
         if (!fresh && !chosen) throw new Error("that session is gone");
         const timed = (line) => `${timeIn(recording, line.at)}${line.text}`;
@@ -791,7 +798,7 @@
         let answer;
         if (message.quick) {
           // A question asked of you, heard in the captions: the fast model (huddle.answerModel, default Haiku) answers
-          // in the chosen session (the question and answer stay there), or from the folder with no session chosen.
+          // in that session (the question and answer stay there), or from the folder with none.
           const model = readSettings().huddle?.answerModel || ai.fastModel();
           answer = chosen
             ? await ai.askSession({ sessionId: chosen.id, cwd: chosen.cwd, timeoutMs: 90000, model, prompt })
@@ -800,14 +807,16 @@
           // Asked by you: into the Claude Desktop conversation itself (queued, sent when its turn is over; with no session
           // chosen, a new conversation opens with it), and its answer, read back from the conversation, shows here.
           const sessionId = fresh ? null : chosen.id;
-          const file = sessionId ? path.join(projectsDir(), huddle.folder.replace(/[:\\/.]/g, "-"), `${sessionId}.jsonl`) : null;
+          // Its transcript is in its own folder's project (a worktree's sessions have their own).
+          const where = fresh ? huddle.folder : chosen.cwd;
+          const file = sessionId ? path.join(projectsDir(), where.replace(/[:\\/.]/g, "-"), `${sessionId}.jsonl`) : null;
           const offset = file && fs.existsSync(file) ? fs.statSync(file).size : 0;
           const since = Date.now();
-          const sent = await __webpack_require__("powertoys/assist").toClaude({ prompt, folder: huddle.folder, sessionId });
+          const sent = await assist.toClaude({ prompt, folder: huddle.folder, sessionId });
           if (sent.clipboard) throw new Error(`Claude Desktop couldn't queue it: "${sent.session}" is open there with the question on the clipboard, to paste`);
-          reply(contents, { type: "answer", id: message.id, answer: "Sent to the conversation in Claude Desktop; its answer shows here…", pending: true });
+          reply(contents, { type: "answer", id: message.id, answer: `Sent to ${fresh ? "a new conversation" : `"${chosen.title}"`} in Claude Desktop; its answer shows here…`, pending: true });
           // A new conversation: by the id Claude Desktop gave back (else the transcript made since that has the question).
-          const found = await answerFrom({ folder: huddle.folder, sessionId: sessionId ?? sent.newSessionId ?? null, probe: message.question, offset: sessionId ? offset : 0, since });
+          const found = await answerFrom({ folder: where, sessionId: sessionId ?? sent.newSessionId ?? null, probe: message.question, offset: sessionId ? offset : 0, since });
           answer = found.text;
           if (!sessionId && found.sessionId) {
             huddle.created.add(found.sessionId);

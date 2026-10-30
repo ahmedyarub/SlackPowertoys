@@ -99,6 +99,7 @@
     }
     throw new Error("no answer within 4 s");
   }
+  exports.desktopCommand = desktopCommand;
 
   /**
    * A prompt for Claude Code: into an existing session of the folder (Claude Desktop queues it, or it opens with the
