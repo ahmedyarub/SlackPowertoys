@@ -113,8 +113,20 @@
     return response.json();
   }
 
+  /** A Windows notification; clicking it brings Slack's window forward. */
+  function notify(title, body) {
+    if (!electron.Notification.isSupported()) return;
+    const shown = new electron.Notification({ title, body });
+    shown.on("click", () => {
+      const window = slackPage() && electron.BrowserWindow.fromWebContents(slackPage());
+      if (window) (window.isMinimized() && window.restore(), window.show(), window.focus());
+    });
+    shown.show();
+    log(`notified: ${title}`);
+  }
+
   // For powertoys/claude.
-  Object.assign(exports, { log, warn, powertoysDir, readSettings, updateSettings, slackPage, signedInTeams, api });
+  Object.assign(exports, { log, warn, powertoysDir, readSettings, updateSettings, slackPage, signedInTeams, api, notify });
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -179,6 +191,21 @@
     recent.push(`${new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(11, 23)} ${what}`);
     if (recent.length > 30) recent.shift();
   };
+  // Quitting can be held (powertoys/huddle: during a huddle): Slack's QUIT_APP is dropped and Electron's before-quit
+  // cancelled, with a dialog saying why; never when Windows shuts down or ends the session.
+  let quitHold = null; // () => why quitting is held now, or null
+  let windowsEnding = false;
+  exports.holdQuit = (why) => (quitHold = why);
+  const heldBecause = () => (windowsEnding ? null : quitHold?.() ?? null);
+  let heldShown = 0;
+  function quitHeld(why) {
+    remember(`quit held: ${why}`);
+    log(`quit held: ${why}`);
+    if (Date.now() - heldShown < 3000) return;
+    heldShown = Date.now();
+    electron.dialog.showMessageBox({ type: "warning", title: "Slack", message: "Slack stays open during a huddle", detail: `${why}. Leave the huddle first, then quit.`, buttons: ["OK"] }).catch(() => {});
+  }
+
   function watchQuit(store) {
     let reported = false;
     const report = (how, stack) => {
@@ -197,7 +224,11 @@
     if (store) {
       const dispatch = store.dispatch;
       store.dispatch = (action) => {
-        if (action?.type === "QUIT_APP" || action?.type === "QUIT_APPLICATION") report(`store ${action.type}`, stackOf());
+        if (action?.type === "QUIT_APP" || action?.type === "QUIT_APPLICATION") {
+          const why = heldBecause();
+          if (why) return quitHeld(why);
+          report(`store ${action.type}`, stackOf());
+        }
         return dispatch(action);
       };
       // (A subscriber runs inside the dispatch that changed the state, so its stack shows who sent it.)
@@ -215,10 +246,14 @@
     for (const window of electron.BrowserWindow.getAllWindows()) window.on("close", () => remember(`window closing: ${window.getTitle()}`));
     electron.app.on("second-instance", (event, argv) => remember(`second instance: ${argv.slice(1).join(" ").slice(0, 200)}`));
     // (Before Slack's own before-quit listener, which sends QUIT_APP at once.)
-    electron.app.prependListener("before-quit", () => remember("before-quit"));
+    electron.app.prependListener("before-quit", (event) => {
+      remember("before-quit");
+      const why = heldBecause();
+      if (why) (event.preventDefault(), quitHeld(why));
+    });
     electron.app.on("will-quit", () => report("will-quit"));
-    electron.powerMonitor.on("shutdown", () => (remember("Windows shutting down"), endRun("Windows shutting down")));
-    electron.app.on("session-end", () => (remember("Windows ending the session"), endRun("Windows ending the session")));
+    electron.powerMonitor.on("shutdown", () => ((windowsEnding = true), remember("Windows shutting down"), endRun("Windows shutting down")));
+    electron.app.on("session-end", () => ((windowsEnding = true), remember("Windows ending the session"), endRun("Windows ending the session")));
     electron.powerMonitor.on("suspend", () => (remember("Windows going to sleep"), seen("asleep")));
     electron.powerMonitor.on("resume", () => remember("Windows woke up"));
     electron.app.on("query-session-end", (event) => remember(`Windows asking to end the session (${event.reasons?.join(", ") ?? ""})`));

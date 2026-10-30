@@ -7,12 +7,17 @@
 //   - a "Claude session" dropdown, always in view (in the Captions list's header), picks one of the Claude Code
 //     sessions of the workspace's folder (Claude Desktop's or the CLI's, worktrees included, from ~/.claude/projects),
 //     or "(New session)", the default, started with the first question;
-//   - double-click a caption (or right-click it, "Ask Claude"): the question is asked in that session itself (it
-//     stays there, with the answer), and the answer shows in a pop-up; while recording, its caption lines carry their
-//     time in the recording, with where the video is, so the session can take a frame at that moment;
-//   - Ctrl+A after a click in the captions selects the caption lines only.
-// Each huddle is recorded to a file (the window, the call's sound, your microphone); when it ends, Slack asks whether
-// to keep it ("huddle": { "autoRecord": true, "recordingsFolder": "<folder>" }).
+//   - double-click a caption (or right-click it, "Ask Claude", or select several, or type): the question goes into that
+//     conversation in Claude Desktop (queued there; with "(New session)", a new conversation opens with it), and its
+//     answer, read back from the conversation, shows in a pop-up; while recording, its caption lines carry their time
+//     in the recording, with where the video is, so the session can take a frame at that moment;
+//   - a question asked of you (someone says your first name and asks), once fully asked, is answered at once by the
+//     fast model (Haiku) in the chosen session, in the pop-up ("huddle": { "autoAnswer": false } turns it off);
+//   - the Brief and the answers' pop-up are dragged by their title bars; Ctrl+A after a click in the captions selects
+//     the caption lines only; Slack can't be quit during a huddle (powertoys/main holds it, with a dialog).
+// Each huddle is recorded to a file (the window, the call's sound, your microphone); when it ends, a notification says
+// it is ready and Slack asks what to do with it ("huddle": { "autoRecord": true, "recordingsFolder": "<folder>" }).
+// Transcripts are corrected with the workspace's ontology when one is chosen (claude.ontologies).
 // When a huddle starts or rings, the Bluetooth radio goes on and Windows connects your paired headphones (the paired
 // device registered as headphones or a headset; "huddle": { "headphones": "<part of a name>" } picks one; null: off);
 // if Bluetooth was off, it goes off again when the huddle ends, at Cancel or Decline, when the window that rang is
@@ -26,7 +31,7 @@
   const fs = __webpack_require__(79896);
   const path = __webpack_require__(16928);
   const os = __webpack_require__(48161);
-  const { log, warn, readSettings, slackPage, powertoysDir, api, signedInTeams } = __webpack_require__("powertoys/main");
+  const { log, warn, readSettings, slackPage, powertoysDir, api, signedInTeams, notify } = __webpack_require__("powertoys/main");
   const ai = __webpack_require__("powertoys/ai");
   const claude = __webpack_require__("powertoys/claude");
 
@@ -400,6 +405,24 @@
     let talk = null;
     let placed = null;
     const hideTalk = () => talk && (talk.box.hidden = true);
+    /** A pop-up dragged by its title bar; where it was put goes to onPlace, so it can open there again. */
+    const draggable = (handle, box, onPlace) =>
+      handle.addEventListener("mousedown", (down) => {
+        if (down.button !== 0) return;
+        down.preventDefault();
+        const rect = box.getBoundingClientRect();
+        const dx = down.clientX - rect.left;
+        const dy = down.clientY - rect.top;
+        const move = (event) => {
+          const where = { left: Math.max(0, Math.min(event.clientX - dx, innerWidth - 60)), top: Math.max(0, Math.min(event.clientY - dy, innerHeight - 40)) };
+          box.style.left = `${where.left}px`;
+          box.style.top = `${where.top}px`;
+          onPlace(where);
+        };
+        const up = () => (document.removeEventListener("mousemove", move, true), document.removeEventListener("mouseup", up, true));
+        document.addEventListener("mousemove", move, true);
+        document.addEventListener("mouseup", up, true);
+      });
     function openTalk(x, y, chosen) {
       if (talk && talk.session.id === chosen.id) {
         talk.box.hidden = false;
@@ -414,21 +437,7 @@
       close.addEventListener("mousedown", (event) => (event.preventDefault(), event.stopPropagation(), hideTalk()));
       const title = el("span", "", `Claude · ${chosen.title}`);
       top.append(title, close);
-      top.addEventListener("mousedown", (down) => {
-        if (down.button !== 0) return;
-        down.preventDefault();
-        const rect = box.getBoundingClientRect();
-        const dx = down.clientX - rect.left;
-        const dy = down.clientY - rect.top;
-        const move = (event) => {
-          placed = { left: Math.max(0, Math.min(event.clientX - dx, innerWidth - 60)), top: Math.max(0, Math.min(event.clientY - dy, innerHeight - 40)) };
-          box.style.left = `${placed.left}px`;
-          box.style.top = `${placed.top}px`;
-        };
-        const up = () => (document.removeEventListener("mousemove", move, true), document.removeEventListener("mouseup", up, true));
-        document.addEventListener("mousemove", move, true);
-        document.addEventListener("mouseup", up, true);
-      });
+      draggable(top, box, (where) => (placed = where));
       const log = el("div", "log");
       log.setAttribute("aria-live", "polite");
       const input = Object.assign(el("textarea", "type"), { rows: 2, placeholder: "Type a question or a reply… (Enter sends)" });
@@ -446,14 +455,14 @@
       talk = { box, log, input, title, session: chosen };
       return talk;
     }
-    function ask(where, { question, at = null, lines = [], speaker = "", before = [], selection = false, typed = false }) {
+    function ask(where, { question, at = null, lines = [], speaker = "", before = [], selection = false, typed = false, quick = false }) {
       const id = ++asked;
-      where.log.append(el("div", "q", typed ? `You: ${question}` : `${speaker ? `${speaker}: ` : ""}${question}`));
+      where.log.append(el("div", "q", typed ? `You: ${question}` : `${quick ? "Asked of you · " : ""}${speaker ? `${speaker}: ` : ""}${question}`));
       const text = el("div", "text", "Thinking…");
       where.log.append(text);
       where.log.scrollTop = where.log.scrollHeight;
       answers.set(id, { text, log: where.log });
-      send({ type: "ask", id, sessionId: where.session.id, question, at, lines, speaker, before, selection, typed });
+      send({ type: "ask", id, sessionId: where.session.id, question, at, lines, speaker, before, selection, typed, quick });
     }
     function showAnswer(x, y, chosen, question) {
       ask(openTalk(x, y, chosen), question);
@@ -486,8 +495,53 @@
         seenLines.set(`${name}|${text}`, caption);
         lastCaptionAt = Date.now();
         send({ type: "caption", ...caption });
+        heard(caption);
       }
     }, 2000);
+
+    // A question asked of you: someone else's last lines (up to three, within 15 s) say your first name, and the latest
+    // is a question. It is answered once fully asked: when someone else starts talking, or when the speaker's lines have
+    // stayed the same for 3 s (more lines from the speaker wait for them). The fast model answers it in the chosen
+    // session, and the pop-up shows it.
+    let me = null; // your first name, lower case (the main process sends it)
+    const recent = []; // the latest captions, in order
+    let waiting = null; // { name, lines, timer }: the question being asked now, and its lines so far
+    const answered = new Set(); // caption ids already in an answered question
+    const QUESTION = /\?\s*$|^(what|how|why|when|where|who|which|can|could|do|does|did|is|are|was|were|will|would|should|have|has|any)\b/i;
+    const firstName = (name) => name.trim().split(/\s+/)[0].toLowerCase();
+    const linesOf = (name) => {
+      const own = [];
+      for (let i = recent.length - 1; i >= 0 && own.length < 3; i--) {
+        if (recent[i].name !== name) break;
+        if (own.length && own[0].at - recent[i].at > 15000) break;
+        own.unshift(recent[i]);
+      }
+      return own;
+    };
+    const finish = () => {
+      if (!waiting) return;
+      const { name, lines } = waiting;
+      clearTimeout(waiting.timer);
+      waiting = null;
+      const own = lines.filter((caption) => !answered.has(caption.id));
+      if (!own.length) return;
+      own.forEach((caption) => answered.add(caption.id));
+      const first = recent.indexOf(own[0]);
+      const before = recent.slice(Math.max(0, first - 4), first).map((caption) => ({ at: caption.at, text: `${caption.name ? `${caption.name}: ` : ""}${caption.text}` }));
+      ask(openTalk(innerWidth - 440, 80, session), { question: own.map((caption) => caption.text).join(" "), speaker: name, at: own[0].at, before, quick: true });
+    };
+    function heard(caption) {
+      if (!recent.includes(caption)) recent.push(caption);
+      if (recent.length > 40) recent.shift();
+      if (!me || !caption.name) return;
+      if (waiting && waiting.name !== caption.name) finish();
+      if (firstName(caption.name) === me) return;
+      const own = linesOf(caption.name);
+      const asking = new RegExp(`\\b${me.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(own.map((each) => each.text).join(" ")) && QUESTION.test(caption.text.trim());
+      if (!asking && waiting?.name !== caption.name) return;
+      clearTimeout(waiting?.timer);
+      waiting = { name: caption.name, lines: own, timer: setTimeout(finish, 3000) };
+    }
     // Captions can stop reaching the recording (a call had them for its first 82 s only): every 2 minutes without a new
     // line, what the window shows, for the log.
     setInterval(() => {
@@ -522,19 +576,21 @@
     brief.tabIndex = -1;
     brief.title = "A short brief for this call";
     let briefBox = null;
+    let briefPlaced = null; // where the Brief was dragged to (it opens there again)
     const showBrief = (text) => {
       briefBox?.remove();
       briefBox = el("div", "answer");
       const top = el("div", "top");
       const close = el("button", "", "×");
-      close.addEventListener("mousedown", (event) => (event.preventDefault(), briefBox.remove(), (briefBox = null)));
+      close.addEventListener("mousedown", (event) => (event.preventDefault(), event.stopPropagation(), briefBox.remove(), (briefBox = null)));
       top.append(el("span", "", "Brief"), close);
+      draggable(top, briefBox, (where) => (briefPlaced = where));
       const log = el("div", "log");
       log.append(Object.assign(el("div", "text"), {}));
       log.firstChild.append(typeof text === "string" ? markdown(text) : text);
       briefBox.append(top, log);
-      briefBox.style.left = "10px";
-      briefBox.style.top = `${Math.max(8, innerHeight - 560)}px`;
+      briefBox.style.left = `${briefPlaced?.left ?? 10}px`;
+      briefBox.style.top = `${briefPlaced?.top ?? Math.max(8, innerHeight - 560)}px`;
       root.appendChild(briefBox);
     };
     brief.addEventListener("mousedown", (event) => {
@@ -557,6 +613,8 @@
         } else if (message.type === "assigned") {
           session = message.session ?? NEW;
           showChip();
+        } else if (message.type === "me") {
+          me = message.name ? firstName(message.name) : null;
         } else if (message.type === "marked") {
           // Said on the chip for a moment: "★ 12:34" (or why not).
           mark.textContent = message.error ? `★ ${message.error}` : `★ Marked ${message.time}`;
@@ -605,6 +663,55 @@
       "part that covers it, at T minus the part's start (ffmpeg -ss <seconds> -i <part> -frames:v 1 <file>.png). Stills of the screen " +
       `when it changed are in "${recording.base}.frames" (named by time). Look at the screen only if the question needs it.\n`
     );
+  }
+
+  /**
+   * The answer to a question sent into a Claude Desktop conversation, read from its transcript (~/.claude/projects): after
+   * the user message holding the question (in the bytes written since it was sent; for a new conversation, the file made
+   * since then that has it), the last text of the assistant's turn, once the turn ends -> { text, sessionId }.
+   */
+  async function answerFrom({ folder, sessionId, probe, offset, since, timeoutMs = 300000 }) {
+    const dir = path.join(projectsDir(), folder.replace(/[:\\/.]/g, "-"));
+    const needle = String(probe).slice(0, 60);
+    const textOf = (content) => (typeof content === "string" ? content : Array.isArray(content) ? content.filter((block) => block.type === "text").map((block) => block.text).join("\n") : "");
+    let file = sessionId ? path.join(dir, `${sessionId}.jsonl`) : null;
+    for (const until = Date.now() + timeoutMs; Date.now() < until; ) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      if (!file && fs.existsSync(dir)) {
+        file = fs.readdirSync(dir)
+          .filter((name) => name.endsWith(".jsonl"))
+          .map((name) => path.join(dir, name))
+          .find((each) => fs.statSync(each).birthtimeMs >= since - 2000 && fs.readFileSync(each, "utf8").includes(needle)) ?? null;
+      }
+      if (!file || !fs.existsSync(file)) continue;
+      const fd = fs.openSync(file, "r");
+      let added;
+      try {
+        const size = fs.fstatSync(fd).size;
+        const start = sessionId ? offset : 0;
+        const buffer = Buffer.alloc(Math.max(0, size - start));
+        fs.readSync(fd, buffer, 0, buffer.length, start);
+        added = buffer.toString("utf8");
+      } finally {
+        fs.closeSync(fd);
+      }
+      const entries = added.split("\n").flatMap((line) => {
+        try {
+          return [JSON.parse(line)];
+        } catch {
+          return [];
+        }
+      });
+      const asked = entries.findLastIndex((entry) => entry.type === "user" && textOf(entry.message?.content).includes(needle));
+      if (asked < 0) continue;
+      let text = "";
+      for (const entry of entries.slice(asked + 1)) {
+        if (entry.type !== "assistant") continue;
+        text = textOf(entry.message?.content) || text;
+        if (["end_turn", "stop_sequence"].includes(entry.message?.stop_reason) && text) return { text, sessionId: path.basename(file, ".jsonl") };
+      }
+    }
+    throw new Error("no answer yet: it is in the conversation in Claude Desktop");
   }
 
   /** The folder's sessions to the huddle window (a session started from the huddle shows even before it has a name). */
@@ -680,25 +787,31 @@
             whereRecorded(recording) +
             "Give me a quick answer I can say out loud: two to four short sentences, plain words, from what you know here " +
             "(look at the code only if you must). Don't change anything.";
-        // Answered by the fast model (huddle.answerModel, default the AI settings' fast model); a session too long for
-        // it goes to Sonnet.
-        const model = readSettings().huddle?.answerModel || ai.fastModel();
+        if (!huddle.folder) throw new Error("this workspace has no folder linked");
         let answer;
-        if (fresh) {
-          // A new session in the workspace's folder, which the next questions go to.
-          if (!huddle.folder) throw new Error("this workspace has no folder linked");
-          const started = await ai.askNew({ cwd: huddle.folder, timeoutMs: 120000, model, prompt });
-          answer = started.text;
-          huddle.created.add(started.sessionId);
-          huddle.session = { id: started.sessionId, title: "(New session)" };
-          log(`huddle: started session ${started.sessionId}`);
+        if (message.quick) {
+          // A question asked of you, heard in the captions: the fast model (huddle.answerModel, default Haiku) answers
+          // in the chosen session (the question and answer stay there), or from the folder with no session chosen.
+          const model = readSettings().huddle?.answerModel || ai.fastModel();
+          answer = chosen
+            ? await ai.askSession({ sessionId: chosen.id, cwd: chosen.cwd, timeoutMs: 90000, model, prompt })
+            : await ai.ask({ fast: true, cwd: huddle.folder, timeoutMs: 90000, prompt });
         } else {
-          const ask = (useModel) => ai.askSession({ sessionId: chosen.id, cwd: chosen.cwd, timeoutMs: 120000, model: useModel, prompt });
-          answer = await ask(model).catch((caught) => {
-            if (model === "sonnet" || !/too long|context|token/i.test(caught.message)) throw caught;
-            warn(`huddle: ${model} couldn't take the session (${caught.message}); asking Sonnet`);
-            return ask("sonnet");
-          });
+          // Asked by you: into the Claude Desktop conversation itself (queued, sent when its turn is over; with no session
+          // chosen, a new conversation opens with it), and its answer, read back from the conversation, shows here.
+          const sessionId = fresh ? null : chosen.id;
+          const file = sessionId ? path.join(projectsDir(), huddle.folder.replace(/[:\\/.]/g, "-"), `${sessionId}.jsonl`) : null;
+          const offset = file && fs.existsSync(file) ? fs.statSync(file).size : 0;
+          const since = Date.now();
+          const sent = await __webpack_require__("powertoys/assist").toClaude({ prompt, folder: huddle.folder, sessionId });
+          if (sent.clipboard) throw new Error(`Claude Desktop couldn't queue it: "${sent.session}" is open there with the question on the clipboard, to paste`);
+          reply(contents, { type: "answer", id: message.id, answer: "Sent to the conversation in Claude Desktop; its answer shows here…", pending: true });
+          const found = await answerFrom({ folder: huddle.folder, sessionId, probe: message.question, offset, since });
+          answer = found.text;
+          if (!sessionId && found.sessionId) {
+            huddle.created.add(found.sessionId);
+            huddle.session = { id: found.sessionId, title: "(New session)" };
+          }
         }
         reply(contents, { type: "answer", id: message.id, answer });
         // The list again: a new session's name, once Claude has given it one.
@@ -987,6 +1100,16 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     headphonesOn("started").catch((caught) => warn(`headphones: ${caught.message}`));
     await contents.executeJavaScript(`(${huddleWindowScript.toString()})()`, true);
     log(`huddle window: Claude added (folder ${huddles.get(contents.id)?.folder ?? "none"})`);
+    // Your name, so the window can tell questions asked of you (huddle.autoAnswer: false turns that off).
+    if (readSettings().huddle?.autoAnswer !== false) {
+      (async () => {
+        const page = slackPage();
+        const team = (await signedInTeams(page)).find((each) => each.id === currentTeamId());
+        if (!team) return;
+        const { userId } = await claude.self(page, team);
+        reply(contents, { type: "me", name: await claude.userName(page, team, userId) });
+      })().catch((caught) => warn(`huddle: your name for questions asked of you: ${caught.message}`));
+    }
     if (readSettings().huddle?.autoRecord !== false) startRecording(contents).catch((caught) => warn(`recording: ${caught.message}`));
   }
 
@@ -1683,6 +1806,7 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     log(`recording finished: ${recording.check}`);
     const minutes = Math.max(1, Math.round((Date.now() - recording.since) / 60000));
     slackPage()?.send("powertoys:recording-done", { base: recording.base, parts: recording.parts.length, where: recording.where, minutes, recovered: recording.recovered, check: recording.check });
+    notify("Recording ready", `The huddle${recording.where ? ` in ${recording.where}` : ""} (${minutes} min) is ready to share: choose what to do with it in Slack.`);
   }
 
   async function stopRecording(contents, ended) {
@@ -1833,13 +1957,92 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     return [...latest.values()].filter((caption) => caption.text).sort((a, b) => a.at - b.at);
   }
 
+  // --- Correcting transcripts with the workspace's ontology ----------------------------------------------------
+  // claude.ontologies[teamId] (chosen from the workspace icon's menu): a file of the business's terms, like lscore's
+  // .agents/skills/pr-lens/ontology.yaml (contexts, objects and external parties, with names, ids and anchors). Its
+  // terms go to the fast model with the transcript's lines, a few hundred at a time, and it answers only the lines
+  // that had a term misheard (speech recognition doesn't know "MUB" or "BondPoint"), corrected and nothing else.
+  // A chunk it answers badly for stays as it was.
+  const ontologyOf = (teamId) => readSettings().claude?.ontologies?.[teamId] ?? null;
+
+  /** The terms of an ontology file: the names, ids, aliases and labels in it (YAML or JSON), else its text. */
+  function ontologyTerms(file) {
+    const text = fs.readFileSync(file, "utf8");
+    const terms = new Set();
+    const add = (value) => {
+      for (const part of String(value).replace(/^\[|\]$/g, "").split(/,(?![^(]*\))/)) {
+        const term = part.trim().replace(/^["']|["']$/g, "").trim();
+        if (term && term.length <= 80 && !/^[{}[\]]/.test(term)) terms.add(term);
+      }
+    };
+    if (/\.json$/i.test(file)) {
+      const walk = (node) => {
+        if (Array.isArray(node)) node.forEach(walk);
+        else if (node && typeof node === "object") for (const [key, value] of Object.entries(node)) /^(names?|aliases|synonyms|terms?|labels?|id|role|services)$/i.test(key) && typeof value !== "object" ? add(value) : walk(value);
+      };
+      walk(JSON.parse(text));
+    } else {
+      for (const match of text.matchAll(/(?:^|[\s{,])(?:name|aliases|synonyms|term|label|id|role|services):\s*("[^"]*"|'[^']*'|\[[^\]]*\]|[^,}\n#]+)/gm)) add(match[1]);
+    }
+    return terms.size ? [...terms].slice(0, 2000).join("; ") : text.slice(0, 20000);
+  }
+
+  /** The texts with the ontology's terms put right (as many as given, in order), or as they were. */
+  async function correctTexts(teamId, texts) {
+    const file = ontologyOf(teamId);
+    if (!file || !texts.length) return texts;
+    let terms;
+    try {
+      terms = ontologyTerms(file);
+    } catch (caught) {
+      warn(`transcripts: the ontology ${file} can't be read (${caught.message})`);
+      return texts;
+    }
+    const out = [...texts];
+    const chunks = [];
+    for (let at = 0; at < texts.length; at += 250) chunks.push(at);
+    let changed = 0;
+    await Promise.all(
+      chunks.map(async (at) => {
+        const lines = texts.slice(at, at + 250);
+        try {
+          const fixes = await ai.ask({
+            fast: true,
+            json: true,
+            timeoutMs: 120000,
+            prompt:
+              "These are lines of a meeting's transcript made by speech recognition, which mishears this business's terms. " +
+              "Correct only words that are a misheard term from the list (spelling, spacing, capitals, a sound-alike word); " +
+              "change nothing else: no rewording, no grammar, no punctuation. Answer as JSON: an object from the number of " +
+              'each line you changed to its corrected text, e.g. {"3": "…"}; {} when nothing needs it.\n\n' +
+              `Terms: ${terms}\n\nLines:\n${lines.map((line, i) => `${i}: ${line}`).join("\n")}`,
+          });
+          for (const [key, value] of Object.entries(fixes ?? {})) {
+            const i = Number(key);
+            if (Number.isInteger(i) && i >= 0 && i < lines.length && typeof value === "string" && value.trim() && value !== lines[i]) {
+              out[at + i] = value;
+              changed++;
+            }
+          }
+        } catch (caught) {
+          warn(`transcripts: lines ${at + 1}-${at + lines.length} not corrected (${caught.message})`);
+        }
+      }),
+    );
+    log(`transcripts: ${changed} of ${texts.length} lines corrected with the ontology ${path.basename(file)}`);
+    return out;
+  }
+
   /**
    * The speaker-named transcript, from the captions: <recording>.captions.txt ("[mm:ss] Name: words", from the
    * recording's start), and a subtitle track "Captions (speakers)" in each part -> the file, or null without captions.
+   * The workspace's ontology corrects the words first.
    */
   async function captionsTranscript(recording) {
-    const lines = captionLines(recording);
-    if (!lines.length) return null;
+    const heard = captionLines(recording);
+    if (!heard.length) return null;
+    const corrected = await correctTexts(recording.teamId, heard.map((line) => line.text));
+    const lines = heard.map((line, i) => ({ ...line, text: corrected[i] }));
     const file = `${recording.base}.captions.txt`;
     fs.writeFileSync(file, `${recording.where ?? "Huddle"}, ${new Date(recording.since).toLocaleString()} (from Slack's live captions, with who spoke)\n\n${lines.map((line) => `[${clock(line.at - recording.since)}] ${line.name ? `${line.name}: ` : ""}${line.text}`).join("\n")}\n`);
     for (const part of recording.parts) {
@@ -1910,7 +2113,9 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
         const fileId = await uploadPrivately(team, audio, `${path.basename(recording.base)}${recording.parts.length > 1 ? ` (part ${i + 1})` : ""} (audio)`);
         updateRecording(recording.base, { slackFiles: [...(recordingAt(recording.base).slackFiles ?? []), fileId] });
         notice("Uploaded; Slack is transcribing it…");
-        const lines = await slackTranscript(fileId);
+        const heard = await slackTranscript(fileId);
+        const corrected = await correctTexts(recording.teamId, heard.map((line) => line.text));
+        const lines = heard.map((line, i) => ({ ...line, text: corrected[i] }));
         sections.push(`${recording.parts.length > 1 ? `# Part ${i + 1}\n` : ""}${lines.map((line) => `[${clock(line.start)}] ${line.text}`).join("\n")}`);
         await addSubtitles(part, lines);
       } finally {
@@ -1966,6 +2171,7 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
           "until I approve it, one by one."
         : "Tell me in a few lines what the call was about, then wait for my questions.");
     log(`${purpose === "tickets" ? "proposing tickets from" : "sharing"} a recording with Claude (${sessionId ? `session ${sessionId}` : "a new Code session"} in ${folder}): ${recording.base}`);
+    notify(purpose === "tickets" ? "Asking Claude for tickets" : "Sending to Claude", `The transcript of the huddle in ${recording.where} is ready and goes to Claude now.`);
     return __webpack_require__("powertoys/assist").toClaude({ prompt, folder, sessionId });
   }
 
@@ -2037,6 +2243,8 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
   let finishing = null;
   function finishBeforeQuit(event) {
     if (finishing === "done") return;
+    // During a huddle quitting is refused altogether (powertoys/main's hold, below), not finished early.
+    if (huddles.size) return;
     if (!finishing && !recordings.size) return;
     event.preventDefault();
     if (finishing) return;
@@ -2048,6 +2256,8 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
   }
 
   exports.start = function start() {
+    // No quitting during a huddle (a dialog says so); Windows shutting down still closes Slack.
+    __webpack_require__("powertoys/main").holdQuit(() => (huddles.size ? "A huddle is in progress" : null));
     // The windows Slack's page opens (huddle, incoming call); the watcher leaves its main window alone.
     electron.app.on("web-contents-created", (event, contents) => {
       if (contents.getType() === "window") watchWindow(contents);

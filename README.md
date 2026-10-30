@@ -75,8 +75,10 @@ patches/files/...           files that are entirely new (written for Powertoys),
   are on" notice is closed for you, as its **Got It** would. A
   "Claude session" dropdown in the captions panel picks one of your Claude Code sessions in the workspace's folder,
   or a new one (the default). Double-click a caption, select several and press **Ask Claude**, or right-click: the
-  question is asked in that session (it stays there) by a fast model, and the answer shows in a pop-up you can drag
-  and type follow-up questions in. While the call is recorded, the caption lines go with their time in the recording,
+  question goes into that conversation in Claude Desktop, and its answer shows in a pop-up you can drag and type
+  follow-up questions in. A question someone asks you by name is answered at once by Haiku in that session, in the
+  same pop-up, as soon as it has been fully asked. The Brief can be dragged too, and Slack can't be quit during a
+  huddle. While the call is recorded, the caption lines go with their time in the recording,
   so Claude can look at the screen at that moment. Ctrl+A in the captions selects only the captions. From the moment a huddle rings or its start screen opens, Bluetooth goes on and
   Windows connects your paired
   headphones (found by their Bluetooth class, whatever their name; `"huddle": {"headphones": "<name>"}` picks a
@@ -91,10 +93,12 @@ patches/files/...           files that are entirely new (written for Powertoys),
   says so, and it restarts. The file has the tracks "Call and microphone" (the default), "Call", "Microphone" and
   "Computer sound (backup)". When the huddle ends, Slack says whether the call's sound was recorded, and offers **Transcribe** (Slack's own transcription, via a private upload,
   saved beside the video and added to it as a subtitle track),
-  **Summarize** (Claude), **Share with Claude** (the Claude Code session you pick, whose answer shows in a pop-up, or a new one, gets the transcript attached and only the
+  **Summarize** (Claude), **Share with Claude** (the Claude Code session you pick when you press OK, or a new one, gets the speaker-named transcript from the captions attached and only the
   video's path, and looks at the video only when the transcript isn't enough) and **Keep** as checkboxes, or delete
   it (Recycle Bin, after a Yes/No); also in the panel's
-  Recordings tab.
+  Recordings tab. A Windows notification says when a recording is ready and when its transcript goes to Claude.
+  Choose an ontology for a workspace (its icon's menu; a YAML or JSON file of your business's terms, like a
+  `ontology.yaml`) and its transcripts are corrected with it: terms speech recognition misheard are put right.
   `"huddle": {"autoRecord": false}` turns it off. You are responsible for telling the people on the call.
 - **Transcription language:** a dropdown in the panel's Settings tab (English by default) for every transcript.
 - **Claude Code tells you in Slack** when a long session finishes or a session needs you: add

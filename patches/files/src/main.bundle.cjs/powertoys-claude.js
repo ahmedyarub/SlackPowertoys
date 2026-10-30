@@ -680,6 +680,31 @@
     return chosen.filePaths[0];
   }
 
+  /** The workspace's ontology for correcting transcripts (claude.ontologies), chosen in a file dialog -> its path. */
+  async function chooseOntology(event, teamId) {
+    const window = electron.BrowserWindow.fromWebContents(event.sender);
+    const current = readSettings().claude?.ontologies?.[teamId];
+    const chosen = await electron.dialog.showOpenDialog(window, {
+      title: "Ontology for this workspace's transcripts (the business's terms)",
+      defaultPath: current ?? settings().folders[teamId],
+      filters: [{ name: "Ontology", extensions: ["yaml", "yml", "json", "md", "txt"] }],
+      properties: ["openFile"],
+    });
+    if (chosen.canceled || !chosen.filePaths[0]) return current ?? null;
+    updateSettings((all) => ({ ...all, claude: { ...all.claude, ontologies: { ...all.claude?.ontologies, [teamId]: chosen.filePaths[0] } } }));
+    log(`workspace ${teamId}: transcripts corrected with ${chosen.filePaths[0]}`);
+    return chosen.filePaths[0];
+  }
+
+  function clearOntology(teamId) {
+    updateSettings((all) => {
+      const { [teamId]: removed, ...ontologies } = all.claude?.ontologies ?? {};
+      return { ...all, claude: { ...all.claude, ontologies } };
+    });
+    log(`workspace ${teamId}: no ontology for transcripts`);
+    return null;
+  }
+
   function unlinkFolder(teamId) {
     updateSettings((all) => {
       const { [teamId]: removed, ...folders } = all.claude?.folders ?? {};
@@ -822,6 +847,9 @@
     electron.ipcMain.handle("powertoys:claude-folder", (event, teamId) => settings().folders[teamId] ?? null);
     electron.ipcMain.handle("powertoys:link-folder", (event, teamId) => linkFolder(event, teamId));
     electron.ipcMain.handle("powertoys:unlink-folder", (event, teamId) => unlinkFolder(teamId));
+    electron.ipcMain.handle("powertoys:ontology", (event, teamId) => readSettings().claude?.ontologies?.[teamId] ?? null);
+    electron.ipcMain.handle("powertoys:choose-ontology", (event, teamId) => chooseOntology(event, teamId));
+    electron.ipcMain.handle("powertoys:clear-ontology", (event, teamId) => clearOntology(teamId));
     watchHuddles();
     watchNewMedia();
   };

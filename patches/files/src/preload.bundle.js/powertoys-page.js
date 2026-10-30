@@ -160,16 +160,16 @@
       },
       {
         label: "Share with Claude",
-        run: async () => {
-          const sessionId = await chooseSession({ base });
+        run: async (chosen) => {
+          const sessionId = chosen !== undefined ? chosen : await chooseSession({ base });
           if (sessionId === undefined) return;
           return invoke("recording", { base, op: "share", sessionId }).then(shared, (caught) => notice(`Couldn't share it with Claude: ${reason(caught)}`));
         },
       },
       {
         label: "Propose tickets",
-        run: async () => {
-          const sessionId = await chooseSession({ base });
+        run: async (chosen) => {
+          const sessionId = chosen !== undefined ? chosen : await chooseSession({ base });
           if (sessionId === undefined) return;
           return invoke("recording", { base, op: "tickets", sessionId }).then(shared, (caught) => notice(`Couldn't ask Claude for tickets: ${reason(caught)}`));
         },
@@ -180,9 +180,11 @@
   }
 
   /**
-   * When a huddle's recording ends: check-boxes for what to do with it (Keep, checked; Transcribe; Summarize and Share
-   * with Claude, which transcribe first) and OK. Unticking Keep and pressing OK asks before the recording goes to the Recycle Bin;
-   * closing the prompt or leaving it keeps the recording.
+   * When a huddle's recording ends: check-boxes for what to do with it (Keep, checked; Transcribe; Summarize; Share with
+   * Claude; Propose tickets) and OK. Summarize, Share and Tickets use the speaker-named transcript from the captions, and
+   * Slack's transcription (an upload of the whole call's sound, minutes long) only when there are no captions or
+   * Transcribe is ticked. The Claude session is chosen at OK, before anything slow starts. Unticking Keep and pressing
+   * OK asks before the recording goes to the Recycle Bin; closing the prompt or leaving it keeps the recording.
    */
   function recordingPrompt({ base, parts, where, minutes, recovered, check: verdict }) {
     const root = ui();
@@ -208,11 +210,8 @@
     const summarize = check("Summarize", false);
     const share = check("Share with Claude", false);
     const tickets = check("Propose tickets", false);
-    // Summarize, Share and Tickets need the transcript, and all of them need the recording kept.
-    for (const needsTranscript of [summarize, share, tickets]) {
-      needsTranscript.input.addEventListener("change", () => needsTranscript.input.checked && ((transcribe.input.checked = true), (keep.input.checked = true)));
-    }
-    transcribe.input.addEventListener("change", () => (transcribe.input.checked ? (keep.input.checked = true) : (summarize.input.checked = share.input.checked = tickets.input.checked = false)));
+    // All of them need the recording kept.
+    for (const needsKept of [transcribe, summarize, share, tickets]) needsKept.input.addEventListener("change", () => needsKept.input.checked && (keep.input.checked = true));
     keep.input.addEventListener("change", () => keep.input.checked || (transcribe.input.checked = summarize.input.checked = share.input.checked = tickets.input.checked = false));
     const close = button("×", () => node.remove(), "close");
     close.title = "Close (the recording is kept)";
@@ -240,15 +239,16 @@
       }
       node.remove();
       const actions = recordingActions(base);
-      const run = (label) => actions.find((action) => action.label === label).run();
-      // One after the other: sharing needs the transcript that Transcribe or Summarize makes first.
+      const run = (label, ...args) => actions.find((action) => action.label === label).run(...args);
       invoke("recording", { base, op: "save" })
         .then(async () => {
+          // The session first, while you are here; then the slow parts, one after the other.
+          const sessionId = share.input.checked || tickets.input.checked ? await chooseSession({ base }) : undefined;
+          if (transcribe.input.checked) await run("Transcribe");
           if (summarize.input.checked) await run("Summarize");
-          else if (transcribe.input.checked) await run("Transcribe");
-          else notice("Recording kept.");
-          if (share.input.checked) await run("Share with Claude");
-          if (tickets.input.checked) await run("Propose tickets");
+          if (!transcribe.input.checked && !summarize.input.checked && sessionId === undefined) notice("Recording kept.");
+          if (sessionId !== undefined && share.input.checked) await run("Share with Claude", sessionId);
+          if (sessionId !== undefined && tickets.input.checked) await run("Propose tickets", sessionId);
         })
         .catch((caught) => notice(`Couldn't keep it: ${reason(caught)}`));
     };
@@ -290,9 +290,19 @@
     notice(`${workspace.name} has no Claude folder now (Ask Claude opens a chat)`);
   }
 
+  async function chooseOntology(workspace) {
+    try {
+      const file = await electron.ipcRenderer.invoke("powertoys:choose-ontology", workspace.teamId);
+      if (file) notice(`Transcripts from ${workspace.name} are corrected with ${file.split(/[\\/]/).pop()}`);
+    } catch (caught) {
+      notice(`Couldn't choose the ontology: ${reason(caught)}`);
+    }
+  }
+
   async function showMenu(x, y, workspace) {
     closeMenu();
     const folder = workspace.teamId ? await electron.ipcRenderer.invoke("powertoys:claude-folder", workspace.teamId) : null;
+    const ontology = workspace.teamId ? await electron.ipcRenderer.invoke("powertoys:ontology", workspace.teamId) : null;
     const folderName = folder?.split(/[\\/]/).filter(Boolean).pop();
     const menu = document.createElement("div");
     menu.className = "menu";
@@ -302,6 +312,8 @@
       workspace.teamId && "separator",
       workspace.teamId && [folder ? `Claude folder: ${folderName} (change…)` : "Link a folder for Claude…", () => linkFolder(workspace), folder],
       folder && ["Unlink the Claude folder", () => unlinkFolder(workspace)],
+      workspace.teamId && [ontology ? `Transcript ontology: ${ontology.split(/[\\/]/).pop()} (change…)` : "Choose an ontology for transcripts…", () => chooseOntology(workspace), ontology],
+      ontology && ["Stop correcting transcripts", () => electron.ipcRenderer.invoke("powertoys:clear-ontology", workspace.teamId).then(() => notice(`Transcripts from ${workspace.name} are no longer corrected`))],
     ];
     for (const entry of entries.filter(Boolean)) {
       const item = document.createElement("div");
