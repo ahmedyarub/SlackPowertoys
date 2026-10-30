@@ -17,9 +17,9 @@
 
   const settings = () => ({ editor: "code", shell: "pwsh", repos: {}, ...readSettings().dev });
 
-  function run(command, args, { input = null, cwd = undefined, timeoutMs = 30000 } = {}) {
+  function run(command, args, { input = null, cwd = undefined, env = undefined, timeoutMs = 30000 } = {}) {
     return new Promise((resolve, reject) => {
-      const child = childProcess.spawn(command, args, { cwd, windowsHide: true, shell: process.platform === "win32" && /\.(cmd|bat)$|^(code|idea|cursor)$/.test(command) });
+      const child = childProcess.spawn(command, args, { cwd, env, windowsHide: true, shell: process.platform === "win32" && /\.(cmd|bat)$|^(code|idea|cursor)$/.test(command) });
       let out = "";
       let err = "";
       const timer = setTimeout(() => (child.kill(), reject(new Error(`${command} took too long`))), timeoutMs);
@@ -32,7 +32,49 @@
   }
 
   // --- GitHub ----------------------------------------------------------------------------------------------
-  const gh = async (route) => JSON.parse(await run("gh", ["api", route]));
+  // gh as an account that can see the repository's owner: the active account first, else each other account gh is
+  // logged in to (its token from `gh auth token --user`, as GH_TOKEN), remembered by owner. The active account is
+  // switched by other tools (pushing to a personal repository), and a personal account gets 404 from a company's.
+  const accountFor = new Map(); // owner -> the account that worked, when it wasn't the active one
+  const tokens = new Map(); // account -> its token
+  let accounts = null;
+  const ghAccounts = () =>
+    (accounts ??= new Promise((resolve) =>
+      childProcess.execFile("gh", ["auth", "status"], { windowsHide: true }, (caught, stdout, stderr) => resolve([...new Set([...`${stdout}${stderr}`.matchAll(/account (\S+)/g)].map((match) => match[1]))])),
+    ));
+  async function ghAs(owner, args, options = {}) {
+    const as = async (account) => {
+      if (!account) return run("gh", args, options);
+      if (!tokens.has(account)) tokens.set(account, (await run("gh", ["auth", "token", "--user", account])).trim());
+      return run("gh", args, { ...options, env: { ...process.env, GH_TOKEN: tokens.get(account) } });
+    };
+    const known = accountFor.get(owner);
+    if (known) {
+      try {
+        return await as(known);
+      } catch (caught) {
+        if (!/Not Found|HTTP 40[134]|Bad credentials|Could not resolve/.test(caught.message)) throw caught;
+        accountFor.delete(owner);
+      }
+    }
+    try {
+      return await as(null);
+    } catch (caught) {
+      if (!/Not Found|HTTP 40[134]|Bad credentials|Could not resolve/.test(caught.message)) throw caught;
+      for (const account of await ghAccounts()) {
+        if (account === known) continue;
+        try {
+          const out = await as(account);
+          accountFor.set(owner, account);
+          log(`github: ${owner}'s repositories through the account ${account}`);
+          return out;
+        } catch {}
+      }
+      throw caught;
+    }
+  }
+  exports.ghAs = ghAs;
+  const gh = async (route) => JSON.parse(await ghAs(/^repos\/([^/]+)\//.exec(route)?.[1] ?? "", ["api", route]));
 
   /** { kind: "pull" | "issue" | "run", owner, repo, number } for a GitHub link, else null. */
   function parseGitHub(url) {

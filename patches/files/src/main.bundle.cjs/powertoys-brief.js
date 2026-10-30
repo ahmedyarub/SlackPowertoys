@@ -82,12 +82,6 @@
   exports.parseReleases = parseReleases;
 
   // --- Links for a ticket: its PRs and the Claude Code sessions about it -----------------------------------
-  const execFile = (command, args) =>
-    new Promise((resolve, reject) =>
-      __webpack_require__(35317).execFile(command, args, { windowsHide: true, timeout: 60000, maxBuffer: 16 * 1024 * 1024 }, (caught, stdout, stderr) =>
-        caught ? reject(new Error(String(stderr || caught.message).trim().split("\n").pop())) : resolve(String(stdout)),
-      ),
-    );
   const ticketsIn = (text, prefix) => [...new Set([...String(text).matchAll(new RegExp(`\\b${prefix}-(\\d+)\\b`, "gi"))].map((match) => `${prefix}-${match[1]}`))];
 
   /** Your PRs (gh, the repositories in dev.repos), by the tickets in their titles and branches -> Map(id -> [pr]). */
@@ -96,7 +90,8 @@
     for (const repo of Object.keys(readSettings().dev?.repos ?? {})) {
       let prs = [];
       try {
-        prs = JSON.parse(await execFile("gh", ["pr", "list", "-R", repo, "--author", "@me", "--state", "all", "--limit", "100", "--json", "number,title,url,state,headRefName,updatedAt"]));
+        // As an account that can see the repository (powertoys/dev), and "@me" is that account.
+        prs = JSON.parse(await __webpack_require__("powertoys/dev").ghAs(repo.split("/")[0], ["pr", "list", "-R", repo, "--author", "@me", "--state", "all", "--limit", "100", "--json", "number,title,url,state,headRefName,updatedAt"]));
       } catch (caught) {
         warn(`brief: ${repo}'s pull requests: ${caught.message}`);
       }
