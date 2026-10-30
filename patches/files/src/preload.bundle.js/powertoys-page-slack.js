@@ -6,12 +6,12 @@
 // preload, puts a script in the page's world that finds Slack's own modules (through its rspack chunk list, by what
 // their code says, not by their short names, which change between releases): the workspaces' stores and the action
 // creators "Set enabled state for huddle closed captions view" and "Set selected tab". It watches the stores: when
-// side-by-side comes on, the Captions tab is selected; when the overlay comes on with it (within 2 s: Slack's join
-// default), it is turned off. The overlay turned on later from the menu stays. Nothing is clicked.
+// side-by-side comes on, the Captions tab is selected; when the overlay comes on within 30 s of that or of the huddle's
+// start (Slack's join default), it is turned off. The overlay turned on later from the menu stays. Nothing is clicked.
 // Slack 4.53 no longer turns side-by-side on at once when you join (in one huddle, only when it ended), so when a huddle
 // window shows (powertoys/huddle tells the page) side-by-side is turned on with Slack's own "Set enabled state for huddle
 // captions side-by-side view" in every store that doesn't have it yet, the Captions tab is selected, and the overlay is
-// turned off, then and when Slack turns it on in the huddle's first 5 s (a store can keep side-by-side on from the
+// turned off, then and when Slack turns it on in the huddle's first 30 s (a store can keep side-by-side on from the
 // last huddle, and then nothing flips for the watcher to act on). During a call the huddle's state is in Slack's client
 // store (it reaches the workspace's store only when the call ends), so that store is watched and set too.
 // Slack's "Heads up — AI notes are on" notice, shown to who joins a huddle with AI notes on, is closed as its "Got It"
@@ -107,10 +107,14 @@
             found.dispatchForClient(tab);
             say("captions: side-by-side on; the side panel shows Captions");
           }
-          // Slack's join default: on with side-by-side, or in the first seconds of a huddle (later, it was you).
-          if (now.isClosedCaptionsEnabled && !before.isClosedCaptionsEnabled && Date.now() - Math.max(sideBySideAt, huddleStartedAt) < 5000) {
-            store.dispatch(found.closedCaptions(false));
-            say("captions: the overlay Slack turned on with them is off (side-by-side only)");
+          // Slack's join default (huddles_cc_by_default): on with side-by-side, or once the huddle's transcription has
+          // started, some seconds in (4.53); within 30 s of either it is Slack's, later it was you.
+          if (now.isClosedCaptionsEnabled && !before.isClosedCaptionsEnabled) {
+            const since = Math.round((Date.now() - Math.max(sideBySideAt, huddleStartedAt)) / 1000);
+            if (since < 30) {
+              store.dispatch(found.closedCaptions(false));
+              say(`captions: the overlay Slack turned on ${since} s in is off (side-by-side only)`);
+            } else say(`captions: the overlay came on ${since} s in; left on (yours)`);
           }
         });
       }
