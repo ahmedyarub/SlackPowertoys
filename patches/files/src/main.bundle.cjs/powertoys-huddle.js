@@ -12,8 +12,12 @@
 //     the dropdown's (queued there; with "(New session)", a new conversation opens with it), and its
 //     answer, read back from the conversation, shows in a pop-up; while recording, its caption lines carry their time
 //     in the recording, with where the video is, so the session can take a frame at that moment;
-//   - a question asked of you (someone says your first name and asks), once fully asked, is answered at once by the
-//     fast model (Haiku) in that same session, in the pop-up ("huddle": { "autoAnswer": false } turns it off);
+//   - a question asked of you (someone says your first name and asks, or anyone asks in a huddle of just the two of
+//     you), once fully asked, goes into that same conversation and its answer shows in the pop-up ("huddle":
+//     { "autoAnswer": false } turns it off);
+//   - "Follow" (off until clicked): the call's finished lines go into that conversation every 20 s, and Claude says
+//     something only when something needs correcting or saying (else NOTHING, which shows nothing), handing deep
+//     investigations to an Opus subagent; everything goes through Claude Desktop, never `claude -p`;
 //   - the Brief and the answers' pop-up are dragged by their title bars; Ctrl+A after a click in the captions selects
 //     the caption lines only; Slack can't be quit during a huddle (powertoys/main holds it, with a dialog).
 // Each huddle is recorded to a file (the window, the call's sound, your microphone); when it ends, a notification says
@@ -99,6 +103,8 @@
       .mark { bottom: 128px; }
       .mark.done { opacity: 1; color: #fff; background: #2eb67d; }
       .brief { bottom: 154px; }
+      .follow { bottom: 180px; }
+      .follow.on { background: #1d9bd1; color: #fff; }
       .rec.on { opacity: 1; color: #fff; background: #e01e5a; }
       .rec.alarm { opacity: 1; color: #1d1c1d; background: #ecb22e; }
       .menu { position: fixed; z-index: 2147483647; min-width: 240px; max-width: 360px; max-height: 50vh; overflow: auto; padding: 4px 0;
@@ -492,7 +498,7 @@
           captions.set(line, caption);
         }
         if (caption.text === text && caption.name === name) continue;
-        Object.assign(caption, { name, text });
+        Object.assign(caption, { name, text, changedAt: Date.now() });
         seenLines.set(`${name}|${text}`, caption);
         lastCaptionAt = Date.now();
         send({ type: "caption", ...caption });
@@ -501,7 +507,7 @@
     }, 2000);
 
     // A question asked of you: someone else's last lines (up to three, within 15 s) say your first name, and the latest
-    // is a question. It is answered once fully asked: when someone else starts talking, or when the speaker's lines have
+    // is a question; in a huddle of just the two of you, any question of theirs. It is answered once fully asked: when someone else starts talking, or when the speaker's lines have
     // stayed the same for 3 s (more lines from the speaker wait for them). The fast model answers it in the chosen
     // session, and the pop-up shows it.
     let me = null; // your first name, lower case (the main process sends it)
@@ -538,7 +544,10 @@
       if (waiting && waiting.name !== caption.name) finish();
       if (firstName(caption.name) === me) return;
       const own = linesOf(caption.name);
-      const asking = new RegExp(`\\b${me.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(own.map((each) => each.text).join(" ")) && QUESTION.test(caption.text.trim());
+      // With only one other person in the huddle (the window says "2 people"), every question of theirs is for you.
+      const twoOfUs = [...document.querySelectorAll("span")].some((each) => each.textContent.trim() === "2 people");
+      const named = new RegExp(`\\b${me.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(own.map((each) => each.text).join(" "));
+      const asking = (twoOfUs || named) && QUESTION.test(caption.text.trim());
       if (!asking && waiting?.name !== caption.name) return;
       clearTimeout(waiting?.timer);
       waiting = { name: caption.name, lines: own, timer: setTimeout(finish, 3000) };
@@ -571,6 +580,31 @@
     mark.addEventListener("mousedown", (event) => (event.preventDefault(), markNow()));
     document.addEventListener("keydown", (event) => event.ctrlKey && event.shiftKey && event.code === "KeyM" && (event.preventDefault(), markNow()), true);
     root.appendChild(mark);
+
+    // "Follow" (off until clicked): the call's finished lines (a newer line has started, or it hasn't changed for 3 s) go
+    // to the conversation every 20 s; Claude says something only when something needs correcting or saying, in the
+    // pop-up. Clicking again stops it.
+    let following = false;
+    const followed = new Set(); // caption ids already sent
+    const followChip = el("button", "chip follow", "Follow");
+    followChip.tabIndex = -1;
+    followChip.title = "Claude follows the call in the chosen conversation and speaks up only when something needs correcting or saying";
+    followChip.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      following = !following;
+      followChip.classList.toggle("on", following);
+      followChip.textContent = following ? "Following" : "Follow";
+      // From now on: what was said before isn't sent.
+      if (following) recent.forEach((caption) => followed.add(caption.id));
+    });
+    root.appendChild(followChip);
+    setInterval(() => {
+      if (!following) return;
+      const lines = recent.filter((caption, i) => !followed.has(caption.id) && caption.text && (i < recent.length - 1 || Date.now() - (caption.changedAt ?? caption.at) > 3000));
+      if (!lines.length) return;
+      lines.forEach((caption) => followed.add(caption.id));
+      send({ type: "follow", sessionId: session.id, lines: lines.map(({ at, name, text }) => ({ at, name, text })) });
+    }, 20000);
 
     // "Brief": what to know before talking (the conversation, its tickets, the last call), or the standup's summary.
     const brief = el("button", "chip brief", "Brief");
@@ -614,6 +648,13 @@
         } else if (message.type === "assigned") {
           session = message.session ?? NEW;
           showChip();
+        } else if (message.type === "follow-answer") {
+          const where = openTalk(innerWidth - 440, 80, session);
+          where.log.append(el("div", "q", "Following the call"));
+          const text = el("div", "text");
+          text.append(markdown(message.text));
+          where.log.append(text);
+          where.log.scrollTop = where.log.scrollHeight;
         } else if (message.type === "me") {
           me = message.name ? firstName(message.name) : null;
         } else if (message.type === "marked") {
@@ -773,16 +814,9 @@
       else await startRecording(contents);
     } else if (message.type === "ask") {
       const recording = recordings.get(contents.id);
-      const assist = __webpack_require__("powertoys/assist");
-      // The conversation selected in Claude Desktop, when it is one of this workspace's folder (or of its worktrees);
-      // else the one chosen in the huddle's dropdown.
-      const selected = huddle.folder ? await assist.desktopCommand({ command: "selectedSession" }).catch(() => null) : null;
-      const inFolder = (cwd) => path.win32.resolve(cwd).toLowerCase().startsWith(path.win32.resolve(huddle.folder).toLowerCase());
-      const fromDesktop = selected?.cliSessionId && selected.cwd && inFolder(selected.cwd) ? { id: selected.cliSessionId, cwd: selected.cwd, title: selected.title } : null;
-      const fresh = !fromDesktop && message.sessionId === "new";
-      const chosen = fromDesktop ?? huddle.sessions.find((each) => each.id === message.sessionId);
       try {
-        if (!fresh && !chosen) throw new Error("that session is gone");
+        if (!huddle.folder) throw new Error("this workspace has no folder linked");
+        const target = await conversationFor(huddle, message.sessionId);
         const timed = (line) => `${timeIn(recording, line.at)}${line.text}`;
         const prompt = message.typed
           ? `(Still on the Slack call; I typed this.) ${message.question}\n${whereRecorded(recording)}` +
@@ -794,35 +828,10 @@
             whereRecorded(recording) +
             "Give me a quick answer I can say out loud: two to four short sentences, plain words, from what you know here " +
             "(look at the code only if you must). Don't change anything.";
-        if (!huddle.folder) throw new Error("this workspace has no folder linked");
-        let answer;
-        if (message.quick) {
-          // A question asked of you, heard in the captions: the fast model (huddle.answerModel, default Haiku) answers
-          // in that session (the question and answer stay there), or from the folder with none.
-          const model = readSettings().huddle?.answerModel || ai.fastModel();
-          answer = chosen
-            ? await ai.askSession({ sessionId: chosen.id, cwd: chosen.cwd, timeoutMs: 90000, model, prompt })
-            : await ai.ask({ fast: true, cwd: huddle.folder, timeoutMs: 90000, prompt });
-        } else {
-          // Asked by you: into the Claude Desktop conversation itself (queued, sent when its turn is over; with no session
-          // chosen, a new conversation opens with it), and its answer, read back from the conversation, shows here.
-          const sessionId = fresh ? null : chosen.id;
-          // Its transcript is in its own folder's project (a worktree's sessions have their own).
-          const where = fresh ? huddle.folder : chosen.cwd;
-          const file = sessionId ? path.join(projectsDir(), where.replace(/[:\\/.]/g, "-"), `${sessionId}.jsonl`) : null;
-          const offset = file && fs.existsSync(file) ? fs.statSync(file).size : 0;
-          const since = Date.now();
-          const sent = await assist.toClaude({ prompt, folder: huddle.folder, sessionId });
-          if (sent.clipboard) throw new Error(`Claude Desktop couldn't queue it: "${sent.session}" is open there with the question on the clipboard, to paste`);
-          reply(contents, { type: "answer", id: message.id, answer: `Sent to ${fresh ? "a new conversation" : `"${chosen.title}"`} in Claude Desktop; its answer shows here…`, pending: true });
-          // A new conversation: by the id Claude Desktop gave back (else the transcript made since that has the question).
-          const found = await answerFrom({ folder: where, sessionId: sessionId ?? sent.newSessionId ?? null, probe: message.question, offset: sessionId ? offset : 0, since });
-          answer = found.text;
-          if (!sessionId && found.sessionId) {
-            huddle.created.add(found.sessionId);
-            huddle.session = { id: found.sessionId, title: "(New session)" };
-          }
-        }
+        // Asked by you, or a question asked of you heard in the captions: into the Claude Desktop conversation itself
+        // (queued, sent when its turn is over; with no session, a new conversation opens with it), never `claude -p`;
+        // its answer, read back from the conversation, shows here.
+        const answer = await inConversation(contents, huddle, target, prompt, message.question, (note) => reply(contents, { type: "answer", id: message.id, answer: note, pending: true }));
         reply(contents, { type: "answer", id: message.id, answer });
         // The list again: a new session's name, once Claude has given it one.
         sendSessions(contents, huddle);
@@ -830,6 +839,78 @@
       } catch (caught) {
         reply(contents, { type: "answer", id: message.id, error: caught.message });
       }
+    } else if (message.type === "follow") {
+      // "Follow": the call's finished lines, a batch at a time, into the conversation (powertoys follows one batch at a
+      // time; lines that come in meanwhile wait for the next).
+      huddle.follow ??= { lines: [], busy: false, sessionId: null };
+      huddle.follow.lines.push(...(message.lines ?? []));
+      huddle.follow.chosen = message.sessionId;
+      if (!huddle.follow.busy) follow(contents, huddle).catch((caught) => warn(`follow: ${caught.message}`));
+    }
+  }
+
+  /**
+   * The conversation a huddle's questions go to: the one selected in Claude Desktop when it is in the workspace's folder
+   * (or one of its worktrees), else the one chosen in the huddle (a session id, or "new") -> { id, cwd, title } or null
+   * for a new one.
+   */
+  async function conversationFor(huddle, chosenId) {
+    const selected = await __webpack_require__("powertoys/assist").desktopCommand({ command: "selectedSession" }).catch(() => null);
+    const inFolder = (cwd) => path.win32.resolve(cwd).toLowerCase().startsWith(path.win32.resolve(huddle.folder).toLowerCase());
+    if (selected?.cliSessionId && selected.cwd && inFolder(selected.cwd)) return { id: selected.cliSessionId, cwd: selected.cwd, title: selected.title };
+    if (chosenId === "new") return null;
+    const chosen = huddle.sessions.find((each) => each.id === chosenId);
+    if (!chosen) throw new Error("that session is gone");
+    return chosen;
+  }
+
+  /** A prompt into a Claude Desktop conversation (null: a new one), and its reply read back from its transcript -> text. */
+  async function inConversation(contents, huddle, target, prompt, probe, onSent = () => {}, timeoutMs = 300000) {
+    const sessionId = target?.id ?? null;
+    // Its transcript is in its own folder's project (a worktree's sessions have their own).
+    const where = target?.cwd ?? huddle.folder;
+    const file = sessionId ? path.join(projectsDir(), where.replace(/[:\\/.]/g, "-"), `${sessionId}.jsonl`) : null;
+    const offset = file && fs.existsSync(file) ? fs.statSync(file).size : 0;
+    const since = Date.now();
+    const sent = await __webpack_require__("powertoys/assist").toClaude({ prompt, folder: huddle.folder, sessionId });
+    if (sent.clipboard) throw new Error(`Claude Desktop couldn't queue it: "${sent.session}" is open there with the prompt on the clipboard, to paste`);
+    onSent(`Sent to ${target ? `"${target.title}"` : "a new conversation"} in Claude Desktop; its answer shows here…`);
+    // A new conversation: by the id Claude Desktop gave back (else the transcript made since that has the prompt).
+    const found = await answerFrom({ folder: where, sessionId: sessionId ?? sent.newSessionId ?? null, probe, offset: sessionId ? offset : 0, since, timeoutMs });
+    if (!sessionId && found.sessionId) {
+      huddle.created.add(found.sessionId);
+      huddle.session = { id: found.sessionId, title: "(New session)" };
+    }
+    return found.text;
+  }
+
+  // "Follow": while it is on, the call's finished lines go to the conversation every 20 s or so, and Claude answers only
+  // when something said needs correcting or something should be said now (else exactly NOTHING, which shows nothing).
+  // A deep investigation it hands to an Opus subagent. Everything goes through the conversation in Claude Desktop.
+  async function follow(contents, huddle) {
+    const state = huddle.follow;
+    state.busy = true;
+    try {
+      while (state.lines.length && !contents.isDestroyed()) {
+        const lines = state.lines.splice(0);
+        const recording = recordings.get(contents.id);
+        // The conversation of the last batch keeps going (a new one, once it exists), else the huddle's.
+        const target = state.sessionId ? { id: state.sessionId, cwd: state.cwd, title: state.title } : await conversationFor(huddle, state.chosen);
+        const said = lines.map((line) => `${timeIn(recording, line.at)}${line.name ? `${line.name}: ` : ""}${line.text}`).join("\n");
+        const prompt =
+          `(Following my Slack call for me${huddle.me ? `; I am ${huddle.me}` : ""}. New lines from the captions:)\n${said}\n\n` +
+          "Reply only if something said needs correcting (a wrong fact about our code, data, tickets or decisions) or something " +
+          "important should be said now. Otherwise reply with exactly NOTHING. If it needs a deep investigation first (reading " +
+          'code, logs or data), hand that to a subagent on Opus (the Agent tool, model "opus") and reply with what it finds. Keep ' +
+          "any reply to two or three short sentences I can say out loud. Don't change anything.";
+        const answer = await inConversation(contents, huddle, target, prompt, lines[0].text, () => {}, 600000).catch((caught) => (warn(`follow: ${caught.message}`), null));
+        if (!target && huddle.session) Object.assign(state, { sessionId: huddle.session.id, cwd: huddle.folder, title: huddle.session.title });
+        else if (target) Object.assign(state, { sessionId: target.id, cwd: target.cwd, title: target.title });
+        if (answer && !/^\s*NOTHING\b/i.test(answer)) reply(contents, { type: "follow-answer", text: answer });
+        log(`follow: ${lines.length} line${lines.length === 1 ? "" : "s"} sent; ${answer ? (/^\s*NOTHING\b/i.test(answer) ? "nothing to say" : "Claude spoke up") : "no answer"}`);
+      }
+    } finally {
+      state.busy = false;
     }
   }
 
@@ -1119,7 +1200,8 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
         const team = (await signedInTeams(page)).find((each) => each.id === currentTeamId());
         if (!team) return;
         const { userId } = await claude.self(page, team);
-        reply(contents, { type: "me", name: await claude.userName(page, team, userId) });
+        huddles.get(contents.id) && (huddles.get(contents.id).me = await claude.userName(page, team, userId));
+        reply(contents, { type: "me", name: huddles.get(contents.id)?.me });
       })().catch((caught) => warn(`huddle: your name for questions asked of you: ${caught.message}`));
     }
     if (readSettings().huddle?.autoRecord !== false) startRecording(contents).catch((caught) => warn(`recording: ${caught.message}`));

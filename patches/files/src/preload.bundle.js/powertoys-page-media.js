@@ -6,6 +6,8 @@
 // Above 100% the video's sound goes through a gain (Web Audio). A video from files.slack.com is first reloaded with
 // credentialed CORS (files.slack.com allows it), where it was, because Chromium silences a cross-origin video's sound
 // in Web Audio otherwise. Slack's own volume control still works and is multiplied by this one.
+// The level is kept for the video, not just its player: maximizing it (a new player) plays it as loud. A video is known
+// by its file address, or, streamed (a blob: address, new for every player), by its length.
 // ---------------------------------------------------------------------------------------------
 (function (module, exports, __webpack_require__) {
   "use strict";
@@ -13,6 +15,10 @@
   let page;
   const MAX = 300;
   const boosts = new WeakMap(); // video -> { gain, percent }
+  const levels = new Map(); // a video's key -> its level, for the next player of it
+  /** What tells a video apart from one player to the next: its file address, or a stream's length. */
+  const keyOf = (video) =>
+    video.currentSrc && !/^blob:/.test(video.currentSrc) ? video.currentSrc.split("?")[0] : Number.isFinite(video.duration) ? `length ${video.duration.toFixed(1)}` : null;
   let context = null;
 
   // In Slack's page (the player's controls are Slack's own nodes), so in the document, not in Powertoys' layer.
@@ -68,6 +74,7 @@
     if (context.state === "suspended") await context.resume();
     state.gain.gain.value = percent / 100;
     state.percent = percent;
+    if (keyOf(video)) levels.set(keyOf(video), percent);
     clearTimeout(state.report);
     state.report = setTimeout(() => {
       const samples = new Float32Array(state.meter.fftSize);
@@ -127,6 +134,20 @@
     return control;
   }
 
+  /** A new player of a video played louder before (maximized, or back from it): the same level, once it knows its video. */
+  function keepLevel(video, control) {
+    const apply = () => {
+      const percent = levels.get(keyOf(video));
+      if (!percent || percent <= 100 || boosts.has(video)) return;
+      setLouder(video, percent).then(
+        () => (show(control, percent), page.log(`louder: kept at ${percent}% in this player of the video`)),
+        (caught) => page.log(`louder: couldn't keep ${percent}% in this player (${caught.message})`),
+      );
+    };
+    if (video.readyState >= 1) apply();
+    else video.addEventListener("loadedmetadata", apply, { once: true });
+  }
+
   // Players come and go as Slack draws them: each one with a video gets the slider after its volume control.
   let placed = false;
   let pending = false;
@@ -134,9 +155,11 @@
     pending = false;
     for (const volume of document.querySelectorAll(".p-media_volume_slider")) {
       if (volume.nextElementSibling?.classList.contains("powertoys-louder") || !videoOf(volume)) continue;
-      volume.after(sliderFor(volume));
+      const control = sliderFor(volume);
+      volume.after(control);
       if (!placed) page.log("louder: the slider is in a video player's controls");
       placed = true;
+      keepLevel(videoOf(volume), control);
     }
   }
 
