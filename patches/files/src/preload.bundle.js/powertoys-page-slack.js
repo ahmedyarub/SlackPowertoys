@@ -11,7 +11,9 @@
 // Slack 4.53 no longer turns side-by-side on at once when you join (in one huddle, only when it ended), so when a huddle
 // window shows (powertoys/huddle tells the page) side-by-side is turned on with Slack's own "Set enabled state for huddle
 // captions side-by-side view" in every store that doesn't have it yet, the Captions tab is selected, and the overlay is
-// turned off, then and when Slack turns it on in the huddle's first 30 s (a store can keep side-by-side on from the
+// turned off. Slack's own default turning the overlay on (with side-by-side, when the call's audio connects) is dropped
+// in the store's dispatch, so the captions menu shows side-by-side only; turning the overlay on from the menu still
+// works. Failing that, it is turned off if it comes on in the huddle's first 30 s (a store can keep side-by-side on from the
 // last huddle, and then nothing flips for the watcher to act on). During a call the huddle's state is in Slack's client
 // store (it reaches the workspace's store only when the call ends), so that store is watched and set too.
 // Slack's "Heads up — AI notes are on" notice, shown to who joins a huddle with AI notes on, is closed as its "Got It"
@@ -89,6 +91,7 @@
       for (const store of allStores()) {
         if (!store?.subscribe || watched.has(store)) continue;
         watched.add(store);
+        guardDispatch(store);
         let last = store.getState()?.huddleEvents ?? {};
         let sideBySideAt = 0;
         let modalsAt = store.getState()?.modal?.lastUpdated;
@@ -121,6 +124,25 @@
       }
     }
 
+    // Slack's join default (huddles_cc_by_default, when the call's audio connects) turns side-by-side and the overlay on
+    // together, one dispatch after the other (dispatchForTeamId); the overlay's half is dropped there, so it never comes
+    // on and the captions menu shows "Side-by-side", not "Closed captions". Turning the overlay on from that menu sends
+    // it alone, and it goes through.
+    function guardDispatch(store) {
+      const dispatch = store.dispatch;
+      const sideBySideType = found.sideBySide.getType();
+      const overlayType = found.closedCaptions.getType();
+      let sideBySideOnAt = 0;
+      store.dispatch = (action) => {
+        if (action?.type === sideBySideType && action.payload === true) sideBySideOnAt = Date.now();
+        else if (action?.type === overlayType && action.payload === true && Date.now() - sideBySideOnAt < 200) {
+          say("captions: Slack's default turned the overlay on with side-by-side; not done (side-by-side only)");
+          return action;
+        }
+        return dispatch(action);
+      };
+    }
+
     // "Got It" closes the notice and nothing else; so does this, wherever it is open.
     function closeAiNotesNotice(store) {
       for (const [key, modals] of Object.entries(found.openModals)) {
@@ -148,9 +170,9 @@
         store.dispatch(tab);
       }
       say(`captions: a huddle started; the side panel shows Captions (side-by-side turned on in ${turned}, overlay turned off in ${overlays} of the stores)`);
-      // Slack turns the overlay on once the call's audio is connected (dispatchForTeamId), and its change isn't always
-      // seen by the watcher: for the huddle's first 30 s every store is read four times a second, and an overlay on is
-      // turned off at once (logged once per store, with when).
+      // In case the overlay comes on some other way than through a store's dispatch (where guardDispatch stops it): for
+      // the huddle's first 30 s every store is read four times a second, and an overlay on is turned off at once
+      // (logged once per store, with when: a sign the drop missed).
       const caught = new Set();
       const poll = setInterval(() => {
         const since = (Date.now() - huddleStartedAt) / 1000;
@@ -158,7 +180,7 @@
         for (const [label, store] of labelledStores()) {
           if (!store.getState?.()?.huddleEvents?.isClosedCaptionsEnabled) continue;
           store.dispatch(found.closedCaptions(false));
-          if (!caught.has(label)) say(`captions: the overlay Slack turned on (${label}) ${since.toFixed(1)} s in is off`);
+          if (!caught.has(label)) say(`captions: the overlay came on (${label}) ${since.toFixed(1)} s in without passing the drop; turned off`);
           caught.add(label);
         }
       }, 250);
