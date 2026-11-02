@@ -105,9 +105,10 @@
    * A prompt for Claude Code: into an existing session of the folder (Claude Desktop queues it, or it opens with the
    * prompt on the clipboard), or, with no session, a new one started in Claude Desktop -> { folder, session?, queued?,
    * clipboard?, newSessionId? }. `model` ("haiku", "opus", …) runs that one turn on it (the conversation's own model
-   * otherwise, or if Claude Desktop refuses it); with `focus` false the conversation isn't brought forward.
+   * otherwise, or if Claude Desktop refuses it); with `focus` false the conversation isn't brought forward. `force`
+   * (the default) has Claude Desktop deliver it now, even during a running turn, rather than after it.
    */
-  async function toClaude({ prompt, folder, sessionId, model = null, focus = true }) {
+  async function toClaude({ prompt, folder, sessionId, model = null, focus = true, force = true }) {
     if (!sessionId) return { folder, newSessionId: await openClaude(prompt, folder) };
     const session = __webpack_require__("powertoys/huddle").projectSessions(folder).find((each) => each.id === sessionId);
     if (!session) throw new Error("that Claude Code session is gone");
@@ -115,7 +116,7 @@
     // open there doesn't show turns added by another process, and two writers on one transcript is unsafe):
     // Claude Desktop's Powertoys queue it (command-request.json: it is sent when the session's turn is over), or,
     // with a Claude Desktop that can't, the session opens with the share on the clipboard, to paste and send.
-    const queue = (withModel) => desktopCommand({ command: "queuePrompt", cliSessionId: sessionId, text: prompt, ...(withModel ? { model: withModel } : {}) });
+    const queue = (withModel) => desktopCommand({ command: "queuePrompt", cliSessionId: sessionId, text: prompt, force, ...(withModel ? { model: withModel } : {}) });
     const queued = await queue(model)
       .catch((caught) => {
         if (!model) throw caught;

@@ -871,14 +871,14 @@
    * A prompt into a Claude Desktop conversation (null: a new one), on `model` for that turn if given, without bringing
    * it forward, and its reply read back from its transcript -> text.
    */
-  async function inConversation(contents, huddle, target, prompt, probe, onSent = () => {}, { model = null, timeoutMs = 300000 } = {}) {
+  async function inConversation(contents, huddle, target, prompt, probe, onSent = () => {}, { model = null, force = true, timeoutMs = 300000 } = {}) {
     const sessionId = target?.id ?? null;
     // Its transcript is in its own folder's project (a worktree's sessions have their own).
     const where = target?.cwd ?? huddle.folder;
     const file = sessionId ? path.join(projectsDir(), where.replace(/[:\\/.]/g, "-"), `${sessionId}.jsonl`) : null;
     const offset = file && fs.existsSync(file) ? fs.statSync(file).size : 0;
     const since = Date.now();
-    const sent = await __webpack_require__("powertoys/assist").toClaude({ prompt, folder: huddle.folder, sessionId, model, focus: false });
+    const sent = await __webpack_require__("powertoys/assist").toClaude({ prompt, folder: huddle.folder, sessionId, model, focus: false, force });
     if (sent.clipboard) throw new Error(`Claude Desktop couldn't queue it: "${sent.session}" is open there with the prompt on the clipboard, to paste`);
     onSent(`Sent to ${target ? `"${target.title}"` : "a new conversation"} in Claude Desktop; its answer shows here…`);
     // A new conversation: by the id Claude Desktop gave back (else the transcript made since that has the prompt).
@@ -910,7 +910,7 @@
           "important should be said now. Otherwise reply with exactly NOTHING. If saying it needs a deep investigation first " +
           "(reading code, logs or data), reply with exactly DEEP: and what to look into, and nothing else. Keep any other reply " +
           "to two or three short sentences I can say out loud. Don't change anything.";
-        const answer = await inConversation(contents, huddle, target, prompt, lines[0].text, () => {}, { model: readSettings().huddle?.followModel || ai.fastModel() }).catch((caught) => (warn(`follow: ${caught.message}`), null));
+        const answer = await inConversation(contents, huddle, target, prompt, lines[0].text, () => {}, { model: readSettings().huddle?.followModel || ai.fastModel(), force: false }).catch((caught) => (warn(`follow: ${caught.message}`), null));
         if (!target && huddle.session) Object.assign(state, { sessionId: huddle.session.id, cwd: huddle.folder, title: huddle.session.title });
         else if (target) Object.assign(state, { sessionId: target.id, cwd: target.cwd, title: target.title });
         const deep = /^\s*DEEP:\s*([\s\S]+)/i.exec(answer ?? "")?.[1]?.trim();
