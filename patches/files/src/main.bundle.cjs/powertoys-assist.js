@@ -126,8 +126,10 @@
       .catch((caught) => (log(`share: Claude Desktop didn't queue it (${caught.message})`), null));
     if (focus || !queued) await electron.shell.openExternal(`claude://resume?session=${encodeURIComponent(sessionId)}`);
     if (queued) {
-      log(`shared into session ${sessionId} (${session.title}): queued in Claude Desktop${queued.model ? ` (${queued.model})` : ""}`);
-      return { folder, session: session.title, queued: true };
+      // Forced: sent at once (into the running turn, or as a new one); else waiting in Claude Desktop's queue.
+      const how = queued.sent ? (queued.duringTurn ? "sent into its running turn" : "sent") : "queued in Claude Desktop";
+      log(`shared into session ${sessionId} (${session.title}): ${how}${queued.model ? ` (${queued.model})` : ""}`);
+      return { folder, session: session.title, queued: true, sent: !!queued.sent, duringTurn: !!queued.duringTurn };
     }
     electron.clipboard.writeText(prompt);
     log(`shared into session ${sessionId} (${session.title}): opened in Claude Desktop, the share on the clipboard`);

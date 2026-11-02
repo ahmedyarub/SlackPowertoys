@@ -745,7 +745,10 @@
           return [];
         }
       });
-      const asked = entries.findLastIndex((entry) => entry.type === "user" && textOf(entry.message?.content).includes(needle));
+      // A user message, or one delivered into a running turn (Claude Desktop's force: a queued_command attachment).
+      const asked = entries.findLastIndex(
+        (entry) => (entry.type === "user" && textOf(entry.message?.content).includes(needle)) || (entry.attachment?.type === "queued_command" && textOf(entry.attachment.prompt).includes(needle)),
+      );
       if (asked < 0) continue;
       let text = "";
       for (const entry of entries.slice(asked + 1)) {

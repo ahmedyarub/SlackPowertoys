@@ -132,9 +132,9 @@
   }
 
   /** A share's outcome: a new session opening, or the chosen session's answer. */
-  const shared = ({ folder, session, queued, clipboard }) =>
+  const shared = ({ folder, session, queued, sent, duringTurn, clipboard }) =>
     queued
-      ? notice(`Sent to "${session}" in Claude Desktop (it goes in as soon as its current turn is over).`)
+      ? notice(sent ? `Sent to "${session}" in Claude Desktop${duringTurn ? " (into the turn it is working on)" : ""}.` : `Sent to "${session}" in Claude Desktop (it goes in as soon as its current turn is over).`)
       : clipboard
         ? notice(`"${session}" is open in Claude Desktop, and the share is on the clipboard: paste it there (Ctrl+V) and send.`, null, 20000)
         : notice(`Opening Claude Code in ${folder} with the transcript…`);
