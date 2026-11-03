@@ -62,17 +62,51 @@
     if (folder) folder = path.win32.resolve(folder);
     if (folder && !prefill) {
       const permissionMode = readSettings().claude?.permissionMode ?? "auto";
-      const started = await desktopCommand({ command: "newSession", folder, text: prompt, permissionMode }).catch((caught) => (log(`new session: Claude Desktop didn't start it (${caught.message}); opening it by link`), null));
+      const asked = Date.now();
+      const started = await desktopCommand({ command: "newSession", folder, text: prompt, permissionMode }).catch((caught) => (log(`new session: Claude Desktop didn't start it (${caught.message})`), null));
       if (started?.cliSessionId) {
         log(`new session ${started.cliSessionId} in ${folder} (${permissionMode})`);
         return started.cliSessionId;
       }
+      // Claude Desktop can answer that it didn't start the session and start it all the same (seen 2026-11-03, a PR
+      // review); a link then opens a second one, asking to trust the folder. The link only when no session
+      // with the prompt shows up in the folder.
+      const anyway = await startedAnyway(folder, prompt, asked);
+      if (anyway) {
+        log(`new session ${anyway} in ${folder}: started all the same; not opened by link too`);
+        return anyway;
+      }
+      log("new session: none started; opening it by link");
     }
     const url = folder ? `claude://code/new?folder=${encodeURIComponent(folder)}&q=${encodeURIComponent(prompt)}` : `claude://claude.ai/new?q=${encodeURIComponent(prompt)}`;
     await electron.shell.openExternal(url);
     return null;
   }
   exports.openClaude = openClaude;
+
+  // A Claude Code transcript in the folder begun since `since` with the prompt's first line in it, looked for for 10 s
+  // -> its CLI session id, or null.
+  async function startedAnyway(folder, prompt, since) {
+    const dir = path.join(process.env.USERPROFILE ?? "", ".claude", "projects", folder.replace(/[:\\/.]/g, "-"));
+    const probe = prompt.split("\n").find((line) => line.trim())?.trim().slice(0, 80);
+    if (!probe) return null;
+    const needle = JSON.stringify(probe).slice(1, -1);
+    for (let waited = 0; waited < 10000; waited += 1000) {
+      const found = (fs.existsSync(dir) ? fs.readdirSync(dir) : [])
+        .filter((name) => name.endsWith(".jsonl"))
+        .map((name) => path.join(dir, name))
+        .find((file) => {
+          try {
+            return fs.statSync(file).birthtimeMs >= since - 2000 && fs.readFileSync(file, "utf8").includes(needle);
+          } catch {
+            return false;
+          }
+        });
+      if (found) return path.basename(found, ".jsonl");
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    return null;
+  }
 
   /**
    * A command for Claude Desktop's Powertoys: its folder (%APPDATA%\Claude\powertoys) is watched for

@@ -222,7 +222,7 @@
   {
    "path": "src/main.bundle.cjs/powertoys-assist.js",
    "kind": "add",
-   "sha256": "2a00025d67a864b15e0f45ed1c57e9a10a303790d67264cd4d26f0b47a95e7e2"
+   "sha256": "defa1eb986ee7b481ce297839c9805814bcffc76a6c755cf1e18e2c81caa51ec"
   },
   {
    "path": "src/main.bundle.cjs/powertoys-brief.js",
