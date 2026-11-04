@@ -473,6 +473,44 @@
   }
   exports.myTickets = myTickets;
 
+  /** Which of these pages (by any of their URLs, at most 99) are your tickets -> [{ id, title, status, url }]. */
+  async function myTicketsAmong(urls) {
+    const keys = [...new Set(urls.map((url) => /([0-9a-f]{32})/.exec(String(url).replace(/-/g, ""))?.[1]).filter(Boolean))].slice(0, 99);
+    if (!keys.length) return [];
+    const current = needTickets();
+    const owner = await myOwnerId();
+    const rows = await sql(
+      current.issues,
+      `SELECT url, Name, Status, "userDefined:ID" FROM "${current.issues}" WHERE Owner LIKE ? AND (${keys.map(() => "url LIKE ?").join(" OR ")})`,
+      [`%${owner}%`, ...keys.map((key) => `%${key}%`)],
+    );
+    return rows.map((row) => ticketOf(row, current.ticketPrefix));
+  }
+  exports.myTicketsAmong = myTicketsAmong;
+
+  /**
+   * What changed in the tickets since `since` (Notion's history of the Issues data source, everyone's tickets) ->
+   * [{ url, title, action ("added", "edited"), before, after (the changed properties), at, by: [names] }].
+   */
+  async function ticketChanges(since) {
+    const current = needTickets();
+    const result = await mcpTool("notion-get-version-changes", { page: current.issues, start_time: since.toISOString() });
+    if (!Array.isArray(result.changes)) throw new Error(`Notion (as you): ${String(result.text ?? JSON.stringify(result)).slice(0, 200)}`);
+    const names = new Map((result.authors ?? []).map((author) => [author.url, author.name]));
+    return result.changes
+      .filter((change) => change.type === "properties")
+      .map((change) => ({
+        url: change.url,
+        title: change.title,
+        action: change.action,
+        before: change.before ?? {},
+        after: change.after ?? {},
+        at: new Date(change.last_edit_time),
+        by: [...new Set((change.contributors ?? []).map((each) => names.get(each.author)).filter(Boolean))],
+      }));
+  }
+  exports.ticketChanges = ticketChanges;
+
   /** A comment on a ticket's page, as you. */
   exports.comment = (pageUrl, markdown) => mcpTool("notion-create-comment", { page_id: pageUrl, markdown });
 

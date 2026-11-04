@@ -77,12 +77,12 @@ patches/files/...           files that are entirely new (written for Powertoys),
   are on" notice is closed for you, as its **Got It** would. A
   "Claude session" dropdown in the captions panel picks one of your Claude Code sessions in the workspace's folder,
   or a new one (the default). Double-click a caption, select several and press **Ask Claude**, or right-click: the
-  question goes into that conversation in Claude Desktop, and its answer shows in a pop-up you can drag and type
-  follow-up questions in. A question someone asks you by name (or any question, when it's just the two of you) goes
-  to that conversation as soon as it has been fully asked, and its answer shows in the same pop-up. **Follow** (off
+  question goes into that conversation in Claude Desktop, where you read the answer: the huddle window only shows a
+  faint chip saying it was asked. **Ask** opens a box to type a question. A question someone asks you by name (or any
+  question, when it's just the two of you) goes to that conversation as soon as it has been fully asked. **Follow** (off
   until you click it) sends the call's finished sentences to that conversation as it goes, and Claude speaks up only
   when something needs correcting or saying. Those checks run on Haiku; anything that needs a deep investigation goes
-  to the same conversation on Opus. The Brief can be dragged too, and Slack can't be quit during a
+  to the same conversation on Opus; what it says shows in a pop-up you can drag. The Brief can be dragged too, and Slack can't be quit during a
   huddle. While the call is recorded, the caption lines go with their time in the recording,
   so Claude can look at the screen at that moment. Ctrl+A in the captions selects only the captions. From the moment a huddle rings or its start screen opens, Bluetooth goes on and
   Windows connects your paired
@@ -156,9 +156,11 @@ patches/files/...           files that are entirely new (written for Powertoys),
   whenever it changes a lot (a new slide, another shared screen). Share with Claude hands all three over before the
   video. **Propose tickets** asks the session you pick for comments and new tickets in your Notion Issues database,
   creating nothing until you approve each one.
-- **Brief:** a faint "Brief" chip in the huddle window. In the daily standup it summarizes what of yours was released
-  since the previous working day (your team's release-bot posts) and your tickets in flight, for "What are you working
-  on? Blocked? Done by?" (`"standup": {"channel", "time", "releaseChannel", "githubUser"}`). In other calls: what's
+- **Brief:** a faint "Brief" chip in the huddle window. In the daily standup it lists, since noon of the previous
+  working day, each ticket of yours with a PR, a status change or a release: one line with its ID and name, where it
+  is (Production, UAT, Dev, Code review, In progress), what it was before, and its PRs. Then what you're on today,
+  what waits on a deploy or testing, and whether anything is blocked
+  (`"standup": {"channel", "time", "releaseChannel", "githubUser"}`). In other calls: what's
   open with that person or channel lately, the tickets mentioned and their status, and the last recorded call.
 - **Tickets next to messages** (Notion read as you; `"notion": {"issues", "people", "ticketPrefix"}`): pointing at a
   ticket ID like "ISS-1780" in a message shows its title and status, and clicking it opens it; **Link to a ticket**

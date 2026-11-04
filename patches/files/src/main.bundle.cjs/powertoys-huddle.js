@@ -9,17 +9,18 @@
 //     or "(New session)", the default, started with the first question;
 //   - double-click a caption (or right-click it, "Ask Claude", or select several, or type): the question goes into the
 //     conversation selected in Claude Desktop when it is one of the workspace folder's (its worktrees' too), else into
-//     the dropdown's (queued there; with "(New session)", a new conversation opens with it), and its
-//     answer, read back from the conversation, shows in a pop-up; while recording, its caption lines carry their time
-//     in the recording, with where the video is, so the session can take a frame at that moment;
+//     the dropdown's (queued there; with "(New session)", a new conversation opens with it); its answer is read in
+//     Claude Desktop, not shown here (a faint chip says it was asked, or why it couldn't be); while recording, its
+//     caption lines carry their time in the recording, with where the video is, so the session can take a frame then;
 //   - a question asked of you (someone says your first name and asks, or anyone asks in a huddle of just the two of
-//     you), once fully asked, goes into that same conversation and its answer shows in the pop-up ("huddle":
-//     { "autoAnswer": false } turns it off);
+//     you), once fully asked, goes into that same conversation the same way ("huddle": { "autoAnswer": false } turns
+//     it off);
 //   - "Follow" (off until clicked): the call's finished lines go into that conversation every 20 s on Haiku, and Claude
 //     says something only when something needs correcting or saying (else NOTHING, which shows nothing); what needs a
 //     deep investigation goes to the same conversation on Opus; everything goes through Claude Desktop (queuePrompt
 //     with a model for the turn), never `claude -p`;
-//   - the Brief and the answers' pop-up are dragged by their title bars; Ctrl+A after a click in the captions selects
+//   - "Ask" opens a box to type a question (it closes once sent); Follow's remarks show in a pop-up ("Conversation"
+//     shows it again); the Brief and that pop-up are dragged by their title bars; Ctrl+A after a click in the captions selects
 //     the caption lines only; Slack can't be quit during a huddle (powertoys/main holds it, with a dialog).
 // Each huddle is recorded to a file (the window, the call's sound, your microphone); when it ends, a notification says
 // it is ready and Slack asks what to do with it ("huddle": { "autoRecord": true, "recordingsFolder": "<folder>" }).
@@ -106,6 +107,9 @@
       .brief { bottom: 154px; }
       .follow { bottom: 180px; }
       .follow.on { background: #1d9bd1; color: #fff; }
+      .asked { bottom: 206px; cursor: default; }
+      .asked[hidden] { display: none; }
+      .asked.failed { opacity: 1; color: #1d1c1d; background: #ecb22e; white-space: normal; }
       .rec.on { opacity: 1; color: #fff; background: #e01e5a; }
       .rec.alarm { opacity: 1; color: #1d1c1d; background: #ecb22e; }
       .menu { position: fixed; z-index: 2147483647; min-width: 240px; max-width: 360px; max-height: 50vh; overflow: auto; padding: 4px 0;
@@ -202,13 +206,13 @@
       const rect = bar.getBoundingClientRect();
       return [rect.left, rect.bottom + 8 + 300 > innerHeight ? rect.top - 350 : rect.bottom + 8];
     };
-    // "Ask": the pop-up with nothing from the captions, to type a question.
+    // "Ask": a box to type a question in (it goes like the others, and the box closes).
     const askNow = el("button", "", "Ask");
     askNow.title = "Type a question to the session";
     askNow.addEventListener("click", () => openTalk(...popupPlace(), session).input.focus());
-    // "Conversation": the pop-up again, as it was (after closing it by mistake), without asking anything.
+    // "Conversation": Follow's pop-up again, as it was (after closing it by mistake).
     const showTalk = el("button", "", "Conversation");
-    showTalk.title = "Show the questions and answers so far";
+    showTalk.title = "Show what Claude said while following the call";
     showTalk.addEventListener("click", () => openTalk(...popupPlace(), session));
     bar.append(label, picker, askNow, showTalk);
     barRoot.append(bar);
@@ -453,8 +457,9 @@
       input.addEventListener("keydown", (event) => {
         if (event.key !== "Enter" || event.shiftKey || event.isComposing || !input.value.trim()) return;
         event.preventDefault();
-        ask(talk, { question: input.value.trim(), typed: true });
+        ask(talk.session, { question: input.value.trim(), typed: true });
         input.value = "";
+        hideTalk();
       });
       box.append(top, log, input);
       root.appendChild(box);
@@ -463,17 +468,28 @@
       talk = { box, log, input, title, session: chosen };
       return talk;
     }
-    function ask(where, { question, at = null, lines = [], speaker = "", before = [], selection = false, typed = false, quick = false }) {
+    // A question goes into the conversation in Claude Desktop, and its answer is read there: here only a faint chip says
+    // it was sent (for a few seconds), or why it couldn't be.
+    const askedChip = el("div", "chip asked");
+    askedChip.hidden = true;
+    root.appendChild(askedChip);
+    let askedTimer = null;
+    const sayAsked = (text, failed = false) => {
+      clearTimeout(askedTimer);
+      askedChip.textContent = text;
+      askedChip.title = text;
+      askedChip.classList.toggle("failed", failed);
+      askedChip.hidden = false;
+      askedTimer = setTimeout(() => (askedChip.hidden = true), failed ? 12000 : 4000);
+    };
+    function ask(chosen, { question, at = null, lines = [], speaker = "", before = [], selection = false, typed = false, quick = false }) {
       const id = ++asked;
-      where.log.append(el("div", "q", typed ? `You: ${question}` : `${quick ? "Asked of you · " : ""}${speaker ? `${speaker}: ` : ""}${question}`));
-      const text = el("div", "text", "Thinking…");
-      where.log.append(text);
-      where.log.scrollTop = where.log.scrollHeight;
-      answers.set(id, { text, log: where.log });
-      send({ type: "ask", id, sessionId: where.session.id, question, at, lines, speaker, before, selection, typed, quick });
+      answers.set(id, true);
+      sayAsked(`Asking Claude${quick ? " (asked of you)" : ""}…`);
+      send({ type: "ask", id, sessionId: chosen.id, question, at, lines, speaker, before, selection, typed, quick });
     }
     function showAnswer(x, y, chosen, question) {
-      ask(openTalk(x, y, chosen), question);
+      ask(chosen, question);
     }
 
     // The Captions tab and side-by-side captions (not the overlay) are set through Slack's own state, from its page
@@ -536,7 +552,7 @@
       own.forEach((caption) => answered.add(caption.id));
       const first = recent.indexOf(own[0]);
       const before = recent.slice(Math.max(0, first - 4), first).map((caption) => ({ at: caption.at, text: `${caption.name ? `${caption.name}: ` : ""}${caption.text}` }));
-      ask(openTalk(innerWidth - 440, 80, session), { question: own.map((caption) => caption.text).join(" "), speaker: name, at: own[0].at, before, quick: true });
+      ask(session, { question: own.map((caption) => caption.text).join(" "), speaker: name, at: own[0].at, before, quick: true });
     };
     function heard(caption) {
       if (!recent.includes(caption)) recent.push(caption);
@@ -671,12 +687,11 @@
           recordingAlarm = message.alarm ?? null;
           showRec();
         } else if (message.type === "answer") {
-          const answer = answers.get(message.id);
-          if (answer) {
-            if (message.answer) answer.text.replaceChildren(markdown(message.answer));
-            else answer.text.textContent = `Couldn't ask Claude: ${message.error}`;
-            answer.log.scrollTop = answer.log.scrollHeight;
-          }
+          // Sent (the note), or why not; the answer itself stays in Claude Desktop.
+          if (!answers.has(message.id)) return;
+          if (message.error) (answers.delete(message.id), sayAsked(`Couldn't ask Claude: ${message.error}`, true));
+          else if (message.pending) sayAsked(message.answer);
+          else answers.delete(message.id);
         }
       },
     };
@@ -818,6 +833,7 @@
       else await startRecording(contents);
     } else if (message.type === "ask") {
       const recording = recordings.get(contents.id);
+      let sent = false;
       try {
         if (!huddle.folder) throw new Error("this workspace has no folder linked");
         const target = await conversationFor(huddle, message.sessionId);
@@ -834,16 +850,20 @@
             "(look at the code only if you must). Don't change anything.";
         // Asked by you, or a question asked of you heard in the captions: into the Claude Desktop conversation itself
         // (queued, sent when its turn is over; with no session, a new conversation opens with it), never `claude -p`;
-        // its answer, read back from the conversation, shows here.
+        // its answer is read there, not shown in the huddle (the window only says it was sent). The reply is still waited
+        // for: it tells a new conversation's id.
         // A question asked of you runs on the fast model (huddle.answerModel, default Haiku); yours on the conversation's.
         const model = message.quick ? readSettings().huddle?.answerModel || ai.fastModel() : null;
-        const answer = await inConversation(contents, huddle, target, prompt, message.question, (note) => reply(contents, { type: "answer", id: message.id, answer: note, pending: true }), { model });
-        reply(contents, { type: "answer", id: message.id, answer });
+        const sentTo = () => ((sent = true), reply(contents, { type: "answer", id: message.id, answer: `Asked in ${target ? `"${target.title}"` : "a new conversation"} in Claude Desktop`, pending: true }));
+        await inConversation(contents, huddle, target, prompt, message.question, sentTo, { model });
+        reply(contents, { type: "answer", id: message.id });
         // The list again: a new session's name, once Claude has given it one.
         sendSessions(contents, huddle);
         setTimeout(() => !contents.isDestroyed() && sendSessions(contents, huddle), 20000);
       } catch (caught) {
-        reply(contents, { type: "answer", id: message.id, error: caught.message });
+        // Once sent, it is in Claude Desktop whatever happens to reading the reply back.
+        if (sent) log(`huddle: asked; its reply wasn't read back (${caught.message})`);
+        else reply(contents, { type: "answer", id: message.id, error: caught.message });
       }
     } else if (message.type === "follow") {
       // "Follow": the call's finished lines, a batch at a time, into the conversation (powertoys follows one batch at a

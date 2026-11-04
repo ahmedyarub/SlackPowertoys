@@ -2,13 +2,16 @@
 // Powertoys (local addition): a brief before (or during) a call, from the "Brief" chip in a huddle window.
 //
 //   - The daily standup (a huddle in standup.channel, "engineering", on a weekday from 30 minutes before standup.time,
-//     "10:00", to an hour after): what was released since the previous working day that is yours (Alfred's posts in
-//     standup.releaseChannel, the lines "… [ISS-n] by @<standup.githubUser>"; its evening release often comes after
-//     midnight), and your tickets (Notion, read as you): working on (In progress, Blocked, Code Review Pending), and
-//     waiting on a deploy or testing, in a few lines for "What are you working on? Are you blocked? Done when?".
+//     "10:00", to two hours after), all since noon of the previous working day: your PRs (gh, dev.repos) opened,
+//     merged, closed or reviewed; your tickets whose status changed (Notion's page history, read as you: from what to
+//     what, when, by whom); what was released that is yours (Alfred's posts in standup.releaseChannel, the lines
+//     "… [ISS-n] by @<standup.githubUser>"; its evening release often comes after midnight); and your tickets now:
+//     working on (In progress, Blocked, Code Review Pending), and waiting on a deploy or testing.
 //   - Any other call: the conversation with that person or channel lately, your tickets mentioned there (their status
 //     now), and the last recording with them; what to raise.
-// Only your tickets. Claude (the fast model) writes it from those facts only (without Claude, the facts themselves);
+// The standup's is laid out here, a line per ticket (its ID and name, where it is: Production, UAT, Dev, Code review,
+// In progress, and its PRs), under Since yesterday, Today, Waiting on deploy or testing, and Blocked.
+// Only your tickets. For a call, Claude (the fast model) writes it from those facts only (without Claude, the facts themselves);
 // its ticket IDs become links, and a list follows with each ticket's links, made here, not by Claude: the Notion
 // ticket, its PRs (gh, your PRs in dev.repos, by the ticket in their title or branch) and the Claude Code sessions
 // about it (the linked folders' sessions naming it in their title or transcript; claude://resume opens them).
@@ -38,7 +41,8 @@
     const [hours, minutes] = String(time).split(":").map(Number);
     const start = new Date(now);
     start.setHours(hours, minutes || 0, 0, 0);
-    return now - start >= -30 * 60e3 && now - start <= 60 * 60e3;
+    // To two hours after: the standup moves an hour when the clocks change (10:00 here before 2 Nov, 11:00 after).
+    return now - start >= -30 * 60e3 && now - start <= 120 * 60e3;
   }
 
   /** The start of the previous working day (Monday: Friday). */
@@ -153,6 +157,19 @@
     return byTicket;
   }
 
+  /** Your PRs (gh, the repositories in dev.repos) updated since `since`, with their reviews and checks, newest first. */
+  async function prsSince(since) {
+    const found = [];
+    for (const repo of Object.keys(readSettings().dev?.repos ?? {})) {
+      const out = await __webpack_require__("powertoys/dev").ghAs(repo.split("/")[0], [
+        "pr", "list", "-R", repo, "--author", "@me", "--state", "all", "--search", `updated:>=${since.toISOString().slice(0, 19)}Z`, "--limit", "40",
+        "--json", "number,title,url,state,isDraft,createdAt,mergedAt,closedAt,updatedAt,headRefName,reviewDecision,latestReviews,statusCheckRollup",
+      ]);
+      found.push(...JSON.parse(out));
+    }
+    return found.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+  }
+
   /** A ticket's line: its link and title, then where it is, its PRs and its sessions (Markdown). */
   function ticketLine(ticket, { where, prs = [], sessions = [] }) {
     const links = [
@@ -164,24 +181,42 @@
 
   /** Ticket IDs in Claude's text as links to the tickets. */
   const linkTickets = (text, urls) => text.replace(/\b([A-Z]+-\d+)\b(?!\]|\()/g, (id) => (urls.get(id) ? `[${id}](${urls.get(id)})` : id));
+  /** A Notion page's id (32 hex digits) in any of its URLs. */
+  const pageKey = (url) => /([0-9a-f]{32})/.exec(String(url ?? "").replace(/-/g, ""))?.[1] ?? null;
 
   async function standupBrief(teamId) {
     const { githubUser } = settings();
     const prefix = notion().ticketPrefix();
+    // Since the afternoon of the previous working day (noon).
     const since = previousWorkingDay();
-    const facts = [];
+    since.setHours(12);
     const problems = [];
     const team = await teamOf(teamId);
     const [prs, sessions] = await Promise.all([prsByTicket(prefix).catch(() => new Map()), Promise.resolve().then(() => sessionsByTicket(prefix)).catch(() => new Map())]);
-    // What of mine was released since the previous working day (its evening release often comes after midnight).
-    let shipped = [];
+    // My PRs since then: opened, merged, closed.
+    let recentPrs = [];
     try {
-      const mine = (await releases(team, since)).flatMap((release) => release.items.filter((item) => item.author === githubUser).map((item) => ({ ...item, env: release.env, version: release.version, at: release.at })));
+      recentPrs = await prsSince(since);
+    } catch (caught) {
+      problems.push(`pull requests: ${caught.message}`);
+    }
+    // My tickets whose status changed since then (Notion's history), or that were created since.
+    let moved = [];
+    let owned = new Map();
+    try {
+      const changes = (await notion().ticketChanges(since)).filter((change) => change.after.Status && change.after.Status !== change.before.Status);
+      owned = new Map((await notion().myTicketsAmong(changes.map((change) => change.url))).map((t) => [pageKey(t.url), t]));
+      moved = changes.filter((change) => owned.has(pageKey(change.url))).map((change) => ({ ...change, ticket: owned.get(pageKey(change.url)) }));
+    } catch (caught) {
+      problems.push(`ticket changes: ${caught.message}`);
+    }
+    // Where my tickets were released, the last 7 days (the latest release of each ticket; its evening release often
+    // comes after midnight).
+    const lastRelease = new Map();
+    try {
       if (!githubUser) problems.push("releases: standup.githubUser isn't set");
-      // A ticket released to UAT and then PROD shows once, where it went last.
-      const byKey = new Map();
-      for (const item of mine) byKey.set(item.ticket ?? item.text, item);
-      shipped = [...byKey.values()];
+      for (const release of await releases(team, new Date(Date.now() - 7 * 86400e3)))
+        for (const item of release.items) if (item.author === githubUser && item.ticket) lastRelease.set(item.ticket, { ...item, env: release.env, version: release.version, at: release.at });
     } catch (caught) {
       problems.push(`releases: ${caught.message}`);
     }
@@ -191,37 +226,71 @@
     } catch (caught) {
       problems.push(`tickets: ${caught.message}`);
     }
-    const shippedTickets = await Promise.all(
-      shipped.map(async (item) => ({ item, ticket: (item.ticket && (await notion().ticket(item.ticket).catch(() => null))) || { id: item.ticket ?? "(no ticket)", title: item.text, url: null } })),
+
+    // Each ticket of mine with something since then, once: its PRs since then, its status change, its release.
+    const touched = new Map();
+    const entry = (id) => (touched.has(id) || touched.set(id, { id, prs: [] }), touched.get(id));
+    const loosePrs = [];
+    for (const pr of recentPrs) {
+      const ids = ticketsIn(`${pr.title} ${pr.headRefName}`, prefix);
+      if (!ids.length) loosePrs.push(pr);
+      for (const id of ids) entry(id).prs.push(pr);
+    }
+    for (const change of moved) Object.assign(entry(change.ticket.id), { ticket: change.ticket, change });
+    for (const [id, release] of lastRelease) if (release.at >= since) entry(id);
+    const known = new Map([...inFlight, ...owned.values()].map((t) => [t.id, t]));
+    await Promise.all(
+      [...touched.values()].map(async (each) => {
+        each.ticket ??= known.get(each.id) ?? (await notion().ticket(each.id).catch(() => null)) ?? {
+          id: each.id,
+          // Not found in Notion: named by its release line or its PR ("fix(scope): what [ISS-n]" -> "what").
+          title: lastRelease.get(each.id)?.text ?? String(each.prs[0]?.title ?? "").replace(/^\w+(\([^)]*\))?!?:\s*/, "").replace(/\s*\[[A-Z]+-\d+\]/g, ""),
+          status: null,
+          url: null,
+        };
+      }),
     );
-    const urls = new Map([...inFlight, ...shippedTickets.map((each) => each.ticket)].filter((t) => t.url).map((t) => [t.id, t.url]));
-    facts.push(
-      shippedTickets.length
-        ? `Released since ${since.toDateString()} (mine):\n${shippedTickets.map(({ item, ticket }) => `- ${ticket.id} ${ticket.title} (${item.env} ${item.version}, ${item.at.toLocaleString()})`).join("\n")}`
-        : `Nothing of mine released since ${since.toDateString()}.`,
-    );
-    const released = new Set(shippedTickets.map(({ ticket }) => ticket.id));
-    const stillInFlight = inFlight.filter((t) => !released.has(t.id) || !/Deployed|Accept/.test(t.status));
-    // What I'm working on (it is "Today"), and what only waits on a deploy or on testing.
-    const working = stillInFlight.filter((t) => /In progress|Blocked|Code Review/i.test(t.status));
-    const waiting = stillInFlight.filter((t) => !working.includes(t));
-    const listed = (tickets) => tickets.map((t) => `- ${t.id} ${t.title} — ${t.status}${prs.get(t.id)?.some((pr) => pr.state === "OPEN") ? " (PR open)" : ""}`).join("\n");
-    facts.push(working.length ? `My tickets I'm working on:\n${listed(working)}` : "No ticket of mine in progress, blocked or in code review.");
-    if (waiting.length) facts.push(`My tickets waiting on a deploy or on testing:\n${listed(waiting)}`);
-    const summary = await write(
-      "Write my standup update from these facts only, in Markdown, short, only about these tickets of mine: **Yesterday** (what shipped, by ticket ID), " +
-        "**Today** (the tickets I'm working on, by ticket ID; not the ones only waiting on a deploy or testing), **Blocked** (only if a fact says so; else \"No\"), **Done by** (only from the facts; else leave it out). " +
-        "Ticket IDs exactly as given. Nothing invented.",
-      facts,
-      problems,
-      "Standup",
-    );
-    const lines = [
-      ...(shippedTickets.length ? ["**Shipped**", ...shippedTickets.map(({ item, ticket }) => ticketLine(ticket, { where: `${item.env} ${item.version}`, prs: item.pr ? [{ number: /\/pull\/(\d+)/.exec(item.pr)?.[1] ?? "PR", url: item.pr, state: "MERGED" }] : prs.get(ticket.id) ?? [], sessions: sessions.get(ticket.id) }))] : []),
-      ...(working.length ? ["**Working on**", ...working.map((t) => ticketLine(t, { where: t.status, prs: prs.get(t.id), sessions: sessions.get(t.id) }))] : []),
-      ...(waiting.length ? ["**Waiting on deploy or testing**", ...waiting.map((t) => ticketLine(t, { where: t.status, prs: prs.get(t.id), sessions: sessions.get(t.id) }))] : []),
+
+    const name = (t) => `**${t.url ? `[${t.id}](${t.url})` : t.id} ${String(t.title ?? "").replace(/\s+/g, " ").trim()}**`;
+    const prText = (pr) => `[#${pr.number}](${pr.url}) ${pr.state === "MERGED" ? "merged" : pr.state === "CLOSED" ? "closed without merging" : pr.isDraft ? "open, draft" : "open"}`;
+    const line = (t, { prs: those = [], was, links = false } = {}) => {
+      const where = stage(t, lastRelease.get(t.id));
+      const extra = [...those.map(prText), ...(links ? (sessions.get(t.id) ?? []).map((session) => `session [${session.title.replace(/[[\]]/g, "")}](claude://resume?session=${session.id})`) : [])];
+      return `- ${name(t)}${where.label ? ` — ${where.label}` : ""}${was && was !== t.status ? ` (was ${was})` : ""}${extra.length ? ` · ${extra.join(" · ")}` : ""}`;
+    };
+    const since_ = [...touched.values()].sort((a, b) => stage(a.ticket, lastRelease.get(a.id)).rank - stage(b.ticket, lastRelease.get(b.id)).rank || a.id.localeCompare(b.id, undefined, { numeric: true }));
+    const working = inFlight.filter((t) => /In progress|Blocked|Code Review/i.test(t.status));
+    const waiting = inFlight.filter((t) => !working.includes(t) && !touched.has(t.id));
+    const blocked = working.filter((t) => /Blocked/i.test(t.status));
+    const openPrs = (t) => (prs.get(t.id) ?? []).filter((pr) => pr.state === "OPEN");
+    const sections = [
+      "**Since yesterday**",
+      ...(since_.length || loosePrs.length
+        ? [...since_.map((each) => line(each.ticket, { prs: each.prs, was: each.change?.action === "edited" ? each.change.before.Status : null })), ...loosePrs.map((pr) => `- ${prText(pr)}: ${pr.title}`)]
+        : ["- Nothing of mine moved."]),
+      "",
+      "**Today**",
+      ...(working.length ? working.map((t) => line(t, { prs: openPrs(t), links: true })) : ["- No ticket in progress or in code review."]),
+      ...(waiting.length ? ["", "**Waiting on deploy or testing**", ...waiting.map((t) => line(t))] : []),
+      "",
+      `**Blocked:** ${blocked.length ? blocked.map((t) => t.id).join(", ") : "No"}`,
     ];
-    return `${linkTickets(summary, urls)}${lines.length ? `\n\n${lines.join("\n")}` : ""}`;
+    log(`brief: Standup (${since_.length} tickets since ${since.toLocaleString()}, ${working.length} today${problems.length ? `, ${problems.length} missing` : ""})`);
+    return `**Standup**\n\n${sections.join("\n")}${problems.length ? `\n\n_Not included: ${problems.join("; ")}._` : ""}`;
+  }
+
+  /** Where a ticket is: production or UAT once released there, else what its status says -> { label, rank }. */
+  function stage(ticket, release) {
+    const status = String(ticket?.status ?? "");
+    if (release?.env === "PROD") return { label: `**Production** (${release.version.replace(/^release_prod_/, "")})`, rank: 0 };
+    if (release?.env === "UAT" || /Deployed\s*\(UAT\)/i.test(status)) return { label: "**UAT**", rank: 1 };
+    if (/Acceptance/i.test(status)) return { label: "**Acceptance testing**", rank: 2 };
+    if (/Deployed\s*\(Dev\)/i.test(status)) return { label: "**Dev**", rank: 3 };
+    if (/Accepted/i.test(status)) return { label: "**Done**, not in a release yet", rank: 4 };
+    if (/Code Review/i.test(status)) return { label: "**Code review**", rank: 5 };
+    if (/In progress/i.test(status)) return { label: "**In progress**", rank: 6 };
+    if (/Blocked/i.test(status)) return { label: "**Blocked**", rank: 7 };
+    return { label: status, rank: 8 };
   }
 
   /** The conversation a huddle is in: a channel by its name, or a DM by the person's name -> its id. */
