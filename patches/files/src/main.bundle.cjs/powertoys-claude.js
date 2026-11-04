@@ -96,12 +96,14 @@
     return cache.get(key);
   }
 
-  function userName(page, team, userId) {
-    if (!userId) return Promise.resolve(null);
-    return cached(`user:${team.id}:${userId}`, async () => {
-      const result = await api(page, team, "users.info", { user: userId });
-      return result.user?.real_name || result.user?.profile?.display_name || result.user?.name || userId;
-    });
+  function userInfo(page, team, userId) {
+    return cached(`user:${team.id}:${userId}`, async () => (await api(page, team, "users.info", { user: userId })).user ?? null);
+  }
+
+  async function userName(page, team, userId) {
+    if (!userId) return null;
+    const user = await userInfo(page, team, userId);
+    return user?.real_name || user?.profile?.display_name || user?.name || userId;
   }
 
   function conversationName(page, team, channelId) {
@@ -161,6 +163,86 @@
     return blocks.map(walk).join("\n").trim();
   }
 
+  // --- rich=1: what a full rendering of a message needs (GET /thread) --------------------------------------
+  const MAX_DATA_URI = 1.5 * 1024 * 1024;
+  const MAX_THUMBS = 6; // per thread
+
+  /** A file of Slack's (with the session's sign-in) as a data: URI, or undefined when it can't be had or is too big. */
+  async function dataUri(page, url) {
+    if (!url) return undefined;
+    try {
+      const response = await page.session.fetch(url);
+      if (!response.ok) return undefined;
+      const bytes = Buffer.from(await response.arrayBuffer());
+      const type = (response.headers.get("content-type") ?? "application/octet-stream").split(";")[0];
+      const uri = `data:${type};base64,${bytes.toString("base64")}`;
+      return uri.length <= MAX_DATA_URI ? uri : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  // The workspace's custom emoji: name -> image URL (aliases followed; an alias of a standard emoji has none).
+  function customEmoji(page, team) {
+    return cached(`emoji:${team.id}`, async () => {
+      const { emoji = {} } = await api(page, team, "emoji.list");
+      const resolve = (name, depth = 0) => (/^alias:/.test(emoji[name] ?? "") && depth < 5 ? resolve(emoji[name].slice(6), depth + 1) : emoji[name]);
+      return new Map(Object.keys(emoji).map((name) => [name, resolve(name)]).filter(([, url]) => /^https?:/.test(url ?? "")));
+    });
+  }
+
+  /** What the blocks and text refer to: user ids, channel ids and emoji names without unicode (custom ones). */
+  function references(message) {
+    const users = new Set();
+    const channels = new Set();
+    const emoji = new Set();
+    const walk = (element) => {
+      if (!element || typeof element !== "object") return;
+      if (Array.isArray(element)) return element.forEach(walk);
+      if (element.type === "user" && element.user_id) users.add(element.user_id);
+      if (element.type === "channel" && element.channel_id) channels.add(element.channel_id);
+      if (element.type === "emoji" && element.name && !element.unicode) emoji.add(element.name);
+      Object.values(element).forEach(walk);
+    };
+    walk(message.blocks);
+    const text = message.text ?? "";
+    for (const [, id] of text.matchAll(/<@([UW][A-Z0-9]+)/g)) users.add(id);
+    for (const [, id] of text.matchAll(/<#([CG][A-Z0-9]+)/g)) channels.add(id);
+    for (const [, name] of text.matchAll(/:([a-z0-9_+'-]+):/g)) emoji.add(name);
+    return { users, channels, emoji };
+  }
+
+  async function richFields(page, team, message, described, budget) {
+    const { users, channels, emoji } = references(message);
+    const names = {};
+    for (const id of users) names[id] = await userName(page, team, id).catch(() => id);
+    const channelNames = {};
+    for (const id of channels) channelNames[id] = (await conversationName(page, team, id).catch(() => id)).replace(/^#/, "");
+    const custom = emoji.size ? await customEmoji(page, team).catch(() => new Map()) : new Map();
+    const emojiUris = {};
+    for (const name of emoji) if (custom.has(name)) emojiUris[name] = await dataUri(page, custom.get(name));
+    const author = message.user ? await userInfo(page, team, message.user).catch(() => null) : null;
+    const avatarUrl = author?.profile?.image_48 ?? message.user_profile?.image_48 ?? message.bot_profile?.icons?.image_48 ?? message.icons?.image_48;
+    const files = [];
+    for (const [index, file] of (message.files ?? []).entries()) {
+      const image = /^image\//.test(file.mimetype ?? "");
+      const thumbUrl = image ? file.thumb_480 ?? file.thumb_360 : undefined;
+      const thumb = thumbUrl && budget.thumbs < MAX_THUMBS ? await dataUri(page, thumbUrl) : undefined;
+      if (thumb) budget.thumbs++;
+      files.push({ ...described.files[index], ...(thumb && { thumb }), width: file.original_w, height: file.original_h, permalink: file.permalink });
+    }
+    return {
+      ...described,
+      files,
+      blocks: message.blocks,
+      mrkdwn: message.text,
+      names,
+      channels: channelNames,
+      avatar: await dataUri(page, avatarUrl),
+      emoji: emojiUris,
+    };
+  }
+
   async function describeMessage(page, team, channel, message) {
     return {
       time: isoTime(message.ts),
@@ -180,7 +262,7 @@
 
   // --- Reading ---------------------------------------------------------------------------------------------
   /** A message with its whole thread, or a channel's latest messages. */
-  async function readThread({ link, limit = 50 }) {
+  async function readThread({ link, limit = 50, rich = false }) {
     const page = requirePage();
     const ref = parseRef(link);
     if (!ref.channel) throw new Error("expected a link to a Slack message or channel");
@@ -194,10 +276,14 @@
         continue;
       }
       const messages = ref.ts ? result.messages : result.messages.reverse();
+      const budget = { thumbs: 0 };
       return {
         workspace: team.name,
         conversation: await conversationName(page, team, ref.channel),
-        messages: await inOrder(messages, (message) => describeMessage(page, team, ref.channel, message)),
+        messages: await inOrder(messages, async (message) => {
+          const described = await describeMessage(page, team, ref.channel, message);
+          return rich ? richFields(page, team, message, described, budget) : described;
+        }),
       };
     }
     throw new Error(`the conversation could not be read (${lastError})`);
@@ -777,7 +863,7 @@
       fs.mkdirSync(folder, { recursive: true });
       return { path: await saveFile({ file: ref.file, host: ref.host, to: path.join(folder, ref.file) }) };
     },
-    "GET /thread": (q) => readThread({ link: q.link, limit: Math.min(number(q.limit) ?? 50, 200) }),
+    "GET /thread": (q) => readThread({ link: q.link, limit: Math.min(number(q.limit) ?? 50, 200), rich: q.rich === "1" }),
     "GET /unreads": (q) => unreads({ workspace: q.workspace, conversations: number(q.conversations), perConversation: number(q.perConversation) }),
     "GET /search": (q) => search({ query: q.query, workspace: q.workspace, count: Math.min(number(q.count) ?? 20, 100), sort: q.sort || "score" }),
     "GET /my-messages": (q) => myMessages({ workspace: q.workspace, count: Math.min(number(q.count) ?? 30, 100), query: q.query }),
