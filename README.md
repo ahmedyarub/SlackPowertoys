@@ -37,7 +37,9 @@ patches/files/...           files that are entirely new (written for Powertoys),
   Slack's own "Mark all as read" makes; Slack then updates its sidebar itself.
 - **Slack for Claude Desktop.** While Slack runs, Powertoys answers on `127.0.0.1`, with a random port and a bearer
   token written to `%APPDATA%\Slack\powertoys\bridge.json` (removed when Slack quits; `{"bridge": false}` in
-  `settings.json` turns it off). It uses your own Slack session, so it sees what you see in Slack.
+  `settings.json` turns it off). It uses your own Slack session, so it sees what you see in Slack. A thread read
+  with `rich=1` also carries what a full rendering needs: Slack's blocks, the raw text, names, avatars, custom emoji
+  and image thumbnails.
   `mcp/slack-powertoys.mjs` is a dependency-free MCP server over it, with these tools:
 
   | Tool | What it does |
@@ -117,7 +119,9 @@ patches/files/...           files that are entirely new (written for Powertoys),
   `http://localhost:47821/notion/callback`, or paste an internal integration's secret; GitHub through the `gh` CLI):
   - **Notion:** link previews (title, path, status, assignees, last edit, first lines; notion.so, notion.site and
     app.notion.com links); a pasted link goes in at once, and its title, linked, replaces it once known (a Notion
-    ticket as "ISS-1995 Title", with its database's ID; a GitHub title; or any page's title). A ticket ID you type or
+    ticket as "ISS-1995 Title", with its database's ID; a GitHub title; or any page's title). Sending a message, or
+    saving an edit, with a GitHub link or a pasted one whose title isn't in yet waits for it (up to 10 s), then sends
+    it. A ticket ID you type or
     paste ("ISS-1780") becomes a link to its Notion page. A Notion page not shared
     with your connection keeps its link and a notice says why. **Save to Notion** in the message menu (a thread, huddle or
     clip, summarized with decisions and action items); **Draft a postmortem in Notion** in incident channels. Claude
