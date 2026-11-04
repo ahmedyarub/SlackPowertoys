@@ -18,6 +18,7 @@
 // Slack's "Heads up — AI notes are on" notice, shown to who joins a huddle with AI notes on, is closed as its "Got It"
 // does: taken out of Slack's open modals (its modal store), and the store told. The notice the one who starts AI notes
 // gets ("Everyone ready to start AI notes?", Start or Cancel) stays.
+// A message powertoys/page-compose held for its links' titles is sent here, by Slack's own send (or an edit's Save).
 // ---------------------------------------------------------------------------------------------
 (function (module, exports, __webpack_require__) {
   "use strict";
@@ -165,6 +166,35 @@
         store.dispatch(tab);
       }
       say(`captions: a huddle started; the side panel shows Captions (side-by-side turned on in ${turned}, overlay turned off in ${overlays} of the stores)`);
+    });
+
+    // Sending a message held for its links' titles (powertoys/page-compose marks its box data-powertoys-send): Slack's
+    // own send, the function its Send button runs (the topmost component given data-qa="texty_send_button"), or, in
+    // the box a message is edited in, the edit's Save (confirmationSuffixButtons.onSaveClick, which Enter runs too).
+    // Nothing is clicked. -> "powertoys:slack-sent" with "sent", "saved", or "" (not found).
+    document.addEventListener("powertoys:slack-command", (event) => {
+      if (event.detail !== "send") return;
+      const answer = (how) => document.dispatchEvent(new CustomEvent("powertoys:slack-sent", { detail: how }));
+      const editor = document.querySelector("[data-powertoys-send]");
+      editor?.removeAttribute("data-powertoys-send");
+      const fiberOf = (node) => node?.[Object.keys(node).find((key) => key.startsWith("__reactFiber$"))];
+      try {
+        const button = editor?.closest('[data-qa="message_input"]')?.querySelector('[data-qa="texty_send_button"]');
+        let send = null;
+        for (let fiber = fiberOf(button); fiber; fiber = fiber.return) {
+          if (fiber.memoizedProps?.["data-qa"] !== "texty_send_button") break;
+          if (typeof fiber.memoizedProps.onClick === "function") send = fiber.memoizedProps.onClick;
+        }
+        if (send) return (send(), answer("sent"));
+        for (let fiber = fiberOf(editor); fiber; fiber = fiber.return) {
+          const save = fiber.memoizedProps?.confirmationSuffixButtons?.onSaveClick;
+          if (typeof save === "function") return (save(), answer("saved"));
+        }
+        say("link titles: Slack's send wasn't found for this box");
+      } catch (caught) {
+        say(`link titles: Slack's send failed: ${caught.message}`);
+      }
+      answer("");
     });
 
     // Slack's modules arrive as its code loads: looked for every 2 s for 3 minutes; the stores, then every 10 s.

@@ -2,7 +2,9 @@
 // Powertoys (local addition): features of Slack's message box (started by powertoys/page).
 //
 //   - Pasting a link (Notion, GitHub, any page with a title): the link goes in at once, and its title replaces its
-//     text, linked, once known (if it is still in the message box).
+//     text, linked, once known (if it is still in the message box). A message (or an edit) with a GitHub link, or a
+//     pasted one, whose title isn't in yet is held when you send it, up to 10 s, titled, then sent by Slack's own
+//     send (or Save).
 //   - Ticket IDs ("ISS-1780"), typed or pasted, become links to their Notion pages; their text stays the ID.
 //   - Secret guard: before a message goes, it is checked here (nothing leaves the computer) for things like API keys,
 //     tokens, private keys and .env lines; you can redact them, send anyway, or cancel.
@@ -13,37 +15,62 @@
   "use strict";
 
   let page;
-  const editorOf = (node) => node?.closest?.('[data-qa="message_input"] .ql-editor');
+  // The message box, and the box a message is edited in.
+  const editorOf = (node) => node?.closest?.('[data-qa="message_input"] .ql-editor, [data-qa="message_editor"] .ql-editor');
 
   // --- Pasting links as titles -----------------------------------------------------------------------------
   const SINGLE_URL = /^https?:\/\/\S+$/;
   let ownPaste = false;
-  // The link goes in at once, as Slack pastes it, so a message sent right away has it; once the page's title is known
-  // it replaces the link's text, if that is still in the message box (not sent, not edited away) and the box still
-  // has the focus.
+  // The link goes in at once, as Slack pastes it; once the page's title is known it replaces the link's text, if that
+  // is still in the message box (not sent, not edited away) and the box still has the focus. Sending holds for it.
+  const titles = new Map(); // link -> its title (null: none), asked once; a failed ask is asked again next time
+  const titleOf = (url) => {
+    if (!titles.has(url))
+      titles.set(
+        url,
+        page.invoke("link-title", url).catch((caught) => {
+          titles.delete(url);
+          // Most often a page the Notion connection wasn't given: say so rather than leave the link unexplained.
+          if (/^Notion\b/.test(page.reason(caught))) page.notice(`No title for this link. ${page.reason(caught)}`);
+          else page.log(`link title: ${url}: ${page.reason(caught)}`);
+          return null;
+        }),
+      );
+    return titles.get(url);
+  };
+
   async function onPaste(event) {
     const editor = editorOf(event.target);
     if (!editor || ownPaste) return;
     const text = event.clipboardData?.getData("text/plain")?.trim() ?? "";
     if (!SINGLE_URL.test(text) || event.clipboardData.getData("text/html")) return;
-    let title = null;
-    try {
-      title = await Promise.race([page.invoke("link-title", text), new Promise((resolve) => setTimeout(() => resolve(null), 4000))]);
-    } catch (caught) {
-      // Most often a page the Notion connection wasn't given: say so rather than leave the link unexplained.
-      if (/^Notion\b/.test(page.reason(caught))) page.notice(`No title for this link. ${page.reason(caught)}`);
-    }
+    const title = await titleOf(text);
     if (title) titleLink(editor, text, title);
   }
 
+  // Links in the box still showing their address: Slack's link chips, links whose text is their address (with or
+  // without https://), and addresses in plain text.
+  const bare = (anchor, url) => [url, url.replace(/^https?:\/\//, "")].includes(anchor.textContent.trim());
+  function bareLinks(editor) {
+    const urls = new Set();
+    for (const slug of editor.querySelectorAll("ts-slug[data-url]")) urls.add(slug.dataset.url);
+    for (const anchor of editor.querySelectorAll("a[href]")) if (bare(anchor, anchor.getAttribute("href"))) urls.add(anchor.getAttribute("href"));
+    const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node.parentElement?.closest("a, ts-slug")) continue;
+      for (const [url] of node.textContent.matchAll(/https?:\/\/[^\s<>]+/g)) urls.add(url.replace(/[.,;:!?)\]]+$/, ""));
+    }
+    return [...urls];
+  }
   function titleLink(editor, url, title) {
     if (!editor.isConnected || document.activeElement !== editor) return;
     // Slack turns a pasted address into a link chip (<ts-slug data-url>, showing it without "https://"); else it is text.
     const slug = [...editor.querySelectorAll("ts-slug[data-url]")].find((each) => each.dataset.url === url);
+    const link = slug ? null : [...editor.querySelectorAll("a[href]")].find((each) => each.getAttribute("href") === url && bare(each, url));
     const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
-    let node = slug ? null : walker.nextNode();
+    let node = slug || link ? null : walker.nextNode();
     while (node && !node.textContent.includes(url)) node = walker.nextNode();
-    if (!slug && !node) return;
+    if (!slug && !link && !node) return;
     const selection = getSelection();
     const caret = selection.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
     const atEnd = (() => {
@@ -56,6 +83,7 @@
     const range = document.createRange();
     const anchor = node?.parentElement?.closest("a");
     if (slug) range.selectNode(slug);
+    else if (link) range.selectNode(link);
     else if (anchor && editor.contains(anchor) && anchor.textContent.trim() === url) range.selectNode(anchor);
     else {
       const at = node.textContent.indexOf(url);
@@ -222,6 +250,61 @@
     return true;
   }
 
+  // --- Sending holds for links' titles --------------------------------------------------------------------
+  // Enter (or Send, or an edit's Save) on a box with a GitHub link, or a pasted link, still showing its address: the
+  // send is held (up to 10 s) until their titles are in, they are put in, the secret check runs, and the message is
+  // sent by Slack's own send (or Save; powertoys/page-slack, in the page). If that can't be found, your next Enter
+  // sends it as it is.
+  const GITHUB_LINK = /^https:\/\/github\.com\/[^/]+\/[^/]+\/(pull|issues|actions\/runs)\/\d+/;
+  const HOLD_MS = 10000;
+  let holding = false;
+  let released = null; // the text your next send lets go as it is
+  function holdForTitles(event, editor) {
+    if (released !== null && editor.innerText === released) {
+      released = null;
+      return false;
+    }
+    const urls = bareLinks(editor).filter((url) => GITHUB_LINK.test(url) || titles.has(url));
+    if (!urls.length) return false;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (!holding) titleThenSend(editor, urls).catch((caught) => page.log(`link titles: ${caught.message}`)).finally(() => (holding = false));
+    holding = true;
+    return true;
+  }
+
+  async function titleThenSend(editor, urls) {
+    const slow = setTimeout(() => page.notice("Getting the link's title; the message goes once it's in (up to 10 s)."), 800);
+    const deadline = new Promise((resolve) => setTimeout(() => resolve(null), HOLD_MS));
+    const found = await Promise.all(urls.map(async (url) => [url, await Promise.race([titleOf(url), deadline])]));
+    clearTimeout(slow);
+    if (!editor.isConnected) return;
+    editor.focus();
+    for (const [url, title] of found) if (title) titleLink(editor, url, title);
+    const missing = found.filter(([, title]) => !title).map(([url]) => url);
+    if (missing.length) page.log(`link titles: none in ${HOLD_MS / 1000} s for ${missing.join(", ")}; sent with the address`);
+    await new Promise((resolve) => setTimeout(resolve, 150)); // Slack's editor takes the change in
+    if (guard(NO_EVENT, editor)) return;
+    const how = await slackSend(editor);
+    if (how) page.log(`link titles: ${found.length - missing.length} of ${found.length} titled; ${how} by Slack`);
+    else {
+      released = editor.innerText;
+      page.notice("Titled. Press Enter to send it.");
+    }
+  }
+  const NO_EVENT = { preventDefault() {}, stopImmediatePropagation() {} };
+
+  /** Slack's own send (or an edit's Save) for this box, run in the page -> "sent", "saved", or "" (not found). */
+  function slackSend(editor) {
+    return new Promise((resolve) => {
+      const answered = (event) => (clearTimeout(timer), document.removeEventListener("powertoys:slack-sent", answered), resolve(String(event.detail ?? "")));
+      const timer = setTimeout(() => answered({ detail: "" }), 1000);
+      document.addEventListener("powertoys:slack-sent", answered);
+      editor.setAttribute("data-powertoys-send", "");
+      document.dispatchEvent(new CustomEvent("powertoys:slack-command", { detail: "send" }));
+    });
+  }
+
   /** Replace text in the message box through the editor (selection + insertText), so Slack's editor keeps track. */
   function replaceAll(editor, values, replacement) {
     editor.focus();
@@ -325,7 +408,7 @@
         const editor = editorOf(event.target);
         if (!editor) return;
         if (event.key === "Enter" && !event.shiftKey && !event.isComposing && !event.ctrlKey && !event.altKey) {
-          guard(event, editor);
+          if (!holdForTitles(event, editor)) guard(event, editor);
         } else if (event.key === "K" && event.ctrlKey && event.shiftKey) {
           event.preventDefault();
           event.stopImmediatePropagation();
@@ -337,10 +420,14 @@
     document.addEventListener(
       "click",
       (event) => {
+        // Send, or an edit's Save.
         const send = event.target.closest?.('[data-qa="texty_send_button"]');
-        if (!send) return;
-        const editor = send.closest('[data-qa="message_input"]')?.querySelector(".ql-editor") ?? document.querySelector('[data-qa="message_input"] .ql-editor');
-        if (editor) guard(event, editor);
+        const save = send ? null : event.target.closest?.('[data-qa="message_editor"] button');
+        if (!send && !(save && /^save\b/i.test(save.getAttribute("aria-label") || save.textContent.trim()))) return;
+        const editor = send
+          ? (send.closest('[data-qa="message_input"]')?.querySelector(".ql-editor") ?? document.querySelector('[data-qa="message_input"] .ql-editor'))
+          : save.closest('[data-qa="message_editor"]').querySelector(".ql-editor");
+        if (editor && !holdForTitles(event, editor)) guard(event, editor);
       },
       true,
     );
