@@ -106,6 +106,20 @@
     return user?.real_name || user?.profile?.display_name || user?.name || userId;
   }
 
+  // A bot's own record (its name and icons): what a bot's message has when it carries only its bot_id.
+  function botInfo(page, team, botId) {
+    return cached(`bot:${team.id}:${botId}`, async () => (await api(page, team, "bots.info", { bot: botId })).bot ?? null);
+  }
+
+  /** Who wrote a message: the person, else the name it was posted under, else its bot's name. */
+  async function authorOf(page, team, message) {
+    const name = (await userName(page, team, message.user)) ?? message.username ?? message.bot_profile?.name;
+    if (name || !message.bot_id) return name ?? "unknown";
+    // As Slack shows it: its bot user's name ("GitHub-E2E"), else the bot's own ("github-e2e").
+    const bot = await botInfo(page, team, message.bot_id).catch(() => null);
+    return (bot?.user_id && (await userName(page, team, bot.user_id).catch(() => null))) || bot?.name || "unknown";
+  }
+
   function conversationName(page, team, channelId) {
     return cached(`conversation:${team.id}:${channelId}`, async () => {
       const { channel } = await api(page, team, "conversations.info", { channel: channelId });
@@ -222,7 +236,8 @@
     const emojiUris = {};
     for (const name of emoji) if (custom.has(name)) emojiUris[name] = await dataUri(page, custom.get(name));
     const author = message.user ? await userInfo(page, team, message.user).catch(() => null) : null;
-    const avatarUrl = author?.profile?.image_48 ?? message.user_profile?.image_48 ?? message.bot_profile?.icons?.image_48 ?? message.icons?.image_48;
+    const bot = !author && message.bot_id && !message.bot_profile?.icons && !message.icons ? await botInfo(page, team, message.bot_id).catch(() => null) : null;
+    const avatarUrl = author?.profile?.image_48 ?? message.user_profile?.image_48 ?? message.bot_profile?.icons?.image_48 ?? message.icons?.image_48 ?? bot?.icons?.image_48;
     const files = [];
     for (const [index, file] of (message.files ?? []).entries()) {
       const image = /^image\//.test(file.mimetype ?? "");
@@ -246,7 +261,7 @@
   async function describeMessage(page, team, channel, message) {
     return {
       time: isoTime(message.ts),
-      author: (await userName(page, team, message.user)) ?? message.username ?? message.bot_profile?.name ?? "unknown",
+      author: await authorOf(page, team, message),
       text: await plainText(page, team, message.text || blocksText(message.blocks)),
       files: (message.files ?? []).map((file) => ({
         id: file.id,
@@ -343,7 +358,7 @@
           workspace: team.name,
           conversation: channel.is_im ? `@${await userName(page, team, channel.user ?? channel.name)}` : `#${channel.name}`,
           time: isoTime(match.ts),
-          author: (await userName(page, team, match.user)) ?? match.username ?? "unknown",
+          author: await authorOf(page, team, match),
           text: await plainText(page, team, match.text || blocksText(match.blocks)),
           link: match.permalink,
         });

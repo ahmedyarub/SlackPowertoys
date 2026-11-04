@@ -232,7 +232,7 @@
   {
    "path": "src/main.bundle.cjs/powertoys-claude.js",
    "kind": "add",
-   "sha256": "45697cc83115ab5a1385df493e941aa3e50db44e79da48c1bd82a97fbe82fa01"
+   "sha256": "962fd0f99f3fa2c318cb21cb387b70ed635cb75d80c7c0df64e787a6e0fb86d4"
   },
   {
    "path": "src/main.bundle.cjs/powertoys-dev.js",
