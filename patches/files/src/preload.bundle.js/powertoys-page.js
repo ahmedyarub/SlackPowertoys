@@ -9,8 +9,9 @@
 // Right-clicking a workspace icon (the switcher button in the left rail, or a workspace in the switcher) shows a
 // small menu: mark everything read in that workspace, or in every workspace (the main process does the marking with
 // Slack's API; Slack's servers then update the sidebar), and link the workspace to a folder for Claude Code.
-// Slack's message menu (right-click a message, or its "More actions") gets "Ask Claude about this", which opens Claude
-// (a Code session in the workspace's folder, or a chat); a notice offers a summary when a huddle you were in ends.
+// Slack's message menu (right-click a message, or its "More actions") gets "Ask Claude about this": a dropdown picks
+// one of the workspace's folder's Claude Code sessions or a new one (with no linked folder, a chat); a notice offers a
+// summary when a huddle you were in ends (the same dropdown).
 // ---------------------------------------------------------------------------------------------
 (function (module, exports, __webpack_require__) {
   "use strict";
@@ -105,15 +106,17 @@
    * Which Claude Code session a share goes to: "(New session)" (the default) or one of the workspace's linked folder's
    * (newest first), in a small dialog -> the session's id, null for a new one, undefined if closed.
    */
-  async function chooseSession(request) {
+  async function chooseSession(request, title = "Share with") {
     const { folder, sessions } = await invoke("claude-sessions", request).catch(() => ({ folder: null, sessions: [] }));
+    // No linked folder: a chat, nothing to choose.
+    if (!folder && title !== "Share with") return null;
     const root = ui();
     root.querySelector(".notice")?.remove();
     return new Promise((resolve) => {
       const node = Object.assign(document.createElement("div"), { className: "notice" });
       node.setAttribute("role", "dialog");
-      node.setAttribute("aria-label", "Share with Claude");
-      const label = Object.assign(document.createElement("label"), { textContent: "Share with" });
+      node.setAttribute("aria-label", title === "Share with" ? "Share with Claude" : title);
+      const label = Object.assign(document.createElement("label"), { textContent: title });
       const select = document.createElement("select");
       select.append(Object.assign(document.createElement("option"), { value: "", textContent: "(New session)" }));
       for (const session of sessions) select.append(Object.assign(document.createElement("option"), { value: session.id, textContent: session.title }));
@@ -267,10 +270,14 @@
     }
   }
 
+  // Into the session picked in the dialog (one of the workspace's linked folder's, or a new one), else a chat.
   async function askClaude(request) {
     try {
-      const { folder } = await electron.ipcRenderer.invoke("powertoys:ask-claude", request);
-      notice(folder ? `Opening Claude Code in ${folder}…` : "Opening Claude…");
+      const sessionId = await chooseSession({ teamId: request.teamId }, "Ask Claude in");
+      if (sessionId === undefined) return;
+      const result = await electron.ipcRenderer.invoke("powertoys:ask-claude", { ...request, sessionId });
+      if (sessionId) shared(result);
+      else notice(result.folder ? `Opening Claude Code in ${result.folder}…` : "Opening Claude…");
     } catch (caught) {
       notice(`Couldn't open Claude: ${reason(caught)}`);
     }

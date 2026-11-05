@@ -232,7 +232,14 @@
           if (url) page.notice(`Gist created (link copied): ${url}`);
         }),
       ),
-      button("Send to Claude Code", (node) => busy(node, "Opening…", () => page.invoke("send-to-code", { code: code(), link, teamId }))),
+      // Into the session picked in the dropdown (one of the workspace's folder's, or a new one there).
+      button("Send to Claude Code", async (node) => {
+        const sessionId = await page.chooseSession({ teamId }, "Send to");
+        if (sessionId === undefined) return;
+        const sent = await busy(node, "Sending…", () => page.invoke("send-to-code", { code: code(), link, teamId, sessionId }));
+        if (sent && sessionId) page.shared(sent);
+        else if (sent) page.notice(sent.folder ? `Opening Claude Code in ${sent.folder}…` : "Opening Claude…");
+      }),
     );
     pre.parentElement.classList.add("powertoys-code-host");
     pre.after(bar);

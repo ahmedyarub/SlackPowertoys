@@ -3,9 +3,9 @@
 //
 // A "Louder" slider in the video player's own controls, right after Slack's volume control (in a message's player and
 // in the media viewer), from 100% (as Slack plays it) to 300%; it shows and hides with Slack's controls.
-// Above 100% the video's sound goes through a gain (Web Audio). A video from files.slack.com is first reloaded with
-// credentialed CORS (files.slack.com allows it), where it was, because Chromium silences a cross-origin video's sound
-// in Web Audio otherwise. Slack's own volume control still works and is multiplied by this one.
+// Above 100% the video's sound goes through a gain (Web Audio), then a limiter and a soft clipper, so it doesn't clip.
+// A video from files.slack.com is first reloaded with credentialed CORS (files.slack.com allows it), where it was,
+// because Chromium silences a cross-origin video's sound in Web Audio otherwise. Slack's own volume control still works and is multiplied by this one.
 // The level is kept for the video, not just its player: maximizing it (a new player) plays it as loud. A video is known
 // by its file address, or, streamed (a blob: address, new for every player), by its length.
 // ---------------------------------------------------------------------------------------------
@@ -55,22 +55,52 @@
     });
   }
 
-  async function setLouder(video, percent) {
-    let state = boosts.get(video);
-    if (!state) {
-      if (percent <= 100) return;
-      const kind = /^blob:/.test(video.currentSrc) ? "stream (blob)" : video.currentSrc.split("?")[0].slice(0, 80);
-      page.log(`louder: ${kind}, crossOrigin ${video.crossOrigin}, muted ${video.muted}, volume ${video.volume}, playing ${!video.paused}`);
-      if (!video.crossOrigin && /^https:\/\/files\.slack\.com\//.test(video.currentSrc)) await reloadWithCors(video);
-      context ??= new AudioContext();
-      const gain = context.createGain();
-      // The level after the gain, for the log: silence there means the video's sound isn't reaching the gain.
-      const meter = context.createAnalyser();
-      context.createMediaElementSource(video).connect(gain).connect(context.destination);
-      gain.connect(meter);
-      state = { gain, meter, percent: 100 };
-      boosts.set(video, state);
+  // A video's gain is set up once: the slider's next moves (it sends several a second) wait for that setup rather than
+  // start another, which would reload the video again and connect it a second time (Chromium refuses that).
+  const setups = new WeakMap(); // video -> the promise of its { gain, meter, percent }
+  function boostOf(video) {
+    if (!setups.has(video)) {
+      const setup = (async () => {
+        const kind = /^blob:/.test(video.currentSrc) ? "stream (blob)" : video.currentSrc.split("?")[0].slice(0, 80);
+        page.log(`louder: ${kind}, crossOrigin ${video.crossOrigin}, muted ${video.muted}, volume ${video.volume}, playing ${!video.paused}`);
+        if (!video.crossOrigin && /^https:\/\/files\.slack\.com\//.test(video.currentSrc)) await reloadWithCors(video);
+        context ??= new AudioContext();
+        const gain = context.createGain();
+        // No clipping: a limiter after the gain (a compressor with a hard knee and a high ratio, from -3 dB; its own
+        // make-up gain leaves the peaks about 1 dB under full scale), then a soft clipper for what its 6 ms look-ahead
+        // lets through: straight up to 0.8, then rounding off towards 1, never cut flat.
+        const limiter = context.createDynamicsCompressor();
+        limiter.threshold.value = -3;
+        limiter.knee.value = 0;
+        limiter.ratio.value = 20;
+        limiter.attack.value = 0.002;
+        limiter.release.value = 0.15;
+        const soft = context.createWaveShaper();
+        const curve = new Float32Array(2049);
+        for (let i = 0; i < curve.length; i++) {
+          const x = (i / (curve.length - 1)) * 2 - 1;
+          curve[i] = Math.abs(x) <= 0.8 ? x : Math.sign(x) * (0.8 + 0.2 * Math.tanh((Math.abs(x) - 0.8) / 0.2));
+        }
+        soft.curve = curve;
+        soft.oversample = "4x";
+        // The level at the end, for the log: silence there means the video's sound isn't reaching the gain.
+        const meter = context.createAnalyser();
+        context.createMediaElementSource(video).connect(gain).connect(limiter).connect(soft).connect(context.destination);
+        soft.connect(meter);
+        const state = { gain, limiter, meter, percent: 100 };
+        boosts.set(video, state);
+        return state;
+      })();
+      setups.set(video, setup);
+      // A failed setup (the video didn't load again) can be tried again by the next move.
+      setup.catch(() => setups.delete(video));
     }
+    return setups.get(video);
+  }
+
+  async function setLouder(video, percent) {
+    if (!setups.has(video) && percent <= 100) return;
+    const state = await boostOf(video);
     if (context.state === "suspended") await context.resume();
     state.gain.gain.value = percent / 100;
     state.percent = percent;
@@ -80,7 +110,7 @@
       const samples = new Float32Array(state.meter.fftSize);
       state.meter.getFloatTimeDomainData(samples);
       const peak = samples.reduce((top, sample) => Math.max(top, Math.abs(sample)), 0);
-      page.log(`louder: ${percent}%, audio ${context.state} at ${context.sampleRate} Hz, peak after the gain ${peak.toFixed(3)}, video ${video.paused ? "paused" : "playing"}, volume ${video.volume}, muted ${video.muted}`);
+      page.log(`louder: ${percent}%, audio ${context.state} at ${context.sampleRate} Hz, peak at the end ${peak.toFixed(3)}, limiter ${state.limiter.reduction.toFixed(1)} dB, video ${video.paused ? "paused" : "playing"}, volume ${video.volume}, muted ${video.muted}`);
     }, 1500);
   }
 

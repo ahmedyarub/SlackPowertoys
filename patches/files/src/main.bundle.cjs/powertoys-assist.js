@@ -53,14 +53,14 @@
 
   /**
    * A new Code session in the folder with the prompt sent, in claude.permissionMode (default auto): Claude Desktop's
-   * Powertoys start it (newSession) and give back its id. With `prefill` (a start for you to finish, like a snippet),
-   * when that fails, or with no folder (a chat), a claude:// link opens it with the prompt in the box instead.
+   * Powertoys start it (newSession) and give back its id. When that fails, or with no folder (a chat), a claude://
+   * link opens it with the prompt in the box instead (in a folder, Claude Desktop then asks to trust it).
    * The folder goes as Windows writes it (E:\a\b): Claude Desktop files a session under its project by that path.
    * -> the new session's CLI id, when Claude Desktop gave it.
    */
-  async function openClaude(prompt, folder, { prefill = false } = {}) {
+  async function openClaude(prompt, folder) {
     if (folder) folder = path.win32.resolve(folder);
-    if (folder && !prefill) {
+    if (folder) {
       const permissionMode = readSettings().claude?.permissionMode ?? "auto";
       const asked = Date.now();
       const started = await desktopCommand({ command: "newSession", folder, text: prompt, permissionMode }).catch((caught) => (log(`new session: Claude Desktop didn't start it (${caught.message})`), null));
@@ -672,7 +672,15 @@
     "open-snippet": ({ code }) => dev.openSnippet(code, languageOf(code)),
     "run-command": ({ code, teamId }, event) => dev.runInTerminal(code.replace(/^\$ /gm, ""), folderOf(teamId) ?? dev.folders(teamId)[0], electron.BrowserWindow.fromWebContents(event.sender)),
     gist: ({ code }, event) => dev.createGist(code, languageOf(code), electron.BrowserWindow.fromWebContents(event.sender)),
-    "send-to-code": ({ code, link, teamId }) => openClaude(`Here is a snippet from Slack${link ? ` (${link})` : ""}:\n\n\`\`\`\n${code}\n\`\`\`\n\n`, folderOf(teamId), { prefill: true }).then(() => ({ ok: true })),
+    // Into the session picked (queued through Claude Desktop), or a new one in the linked folder started by Claude
+    // Desktop's newSession (a claude:// link would ask to trust the folder); with no linked folder, a chat.
+    "send-to-code": async ({ code, link, teamId, sessionId = null }) => {
+      const folder = folderOf(teamId);
+      const prompt = `Here is a snippet from Slack${link ? ` (${link})` : ""}:\n\n\`\`\`\n${code}\n\`\`\`\n\nRead it, then wait for my question.`;
+      if (sessionId && folder) return toClaude({ prompt, folder, sessionId });
+      await openClaude(prompt, folder);
+      return { folder };
+    },
     "github-info": (url) => dev.githubInfo(url),
     "open-in-slack": openInSlack,
     "review-pull": reviewPull,

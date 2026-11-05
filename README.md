@@ -64,7 +64,9 @@ patches/files/...           files that are entirely new (written for Powertoys),
   ```
 - **Ask Claude about this**, in Slack's message menu (right-click a message, or its "More actions"): opens Claude
   Desktop with the message's link and a prompt to read it (with its thread and any clip transcripts) through the tools
-  above. If the workspace is linked to a folder, it starts a Claude Code session in that folder; otherwise a chat.
+  above. If the workspace is linked to a folder, a dropdown first picks one of your Claude Code sessions there, or a
+  new one; otherwise a chat. "Summarize with Claude" and a code block's "Send to Claude Code" pick the same way, and
+  a new session starts without asking you to trust the folder.
 - **A folder per workspace:** right-click a workspace icon, "Link a folder for Claude…" (kept in `settings.json`
   under `claude.folders`). Claude Code sessions started from that workspace open in that folder.
 - **Huddle summaries:** when a huddle you were in ends with a transcript, a notice offers "Summarize with Claude"
@@ -150,7 +152,7 @@ patches/files/...           files that are entirely new (written for Powertoys),
   saved to `%APPDATA%\Slack\powertoys\history\messages.jsonl` before the message is marked, and listed in the panel's
   History tab. Only what your Slack sees while it runs is kept.
 - **Louder videos:** a "Louder" slider in the video player's controls, next to Slack's volume, 100% to 300%, on top of
-  Slack's own volume.
+  Slack's own volume, with a limiter so the louder sound doesn't clip.
 - **More from each recording:** a transcript with who spoke (from Slack's live captions, also as a subtitle track);
   **★ Mark** (or Ctrl+Shift+M) in the huddle window to mark a moment, which becomes a chapter; stills of the screen
   whenever it changes a lot (a new slide, another shared screen). Share with Claude hands all three over before the

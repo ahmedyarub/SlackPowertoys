@@ -755,10 +755,15 @@
     huddle: (link) => `Read this Slack huddle's transcript with the slack-powertoys tools and summarize it: the key points, decisions and action items (with owners):\n${link}`,
   };
 
-  async function askClaude({ link, teamId, kind = "message" }) {
+  async function askClaude({ link, teamId, kind = "message", sessionId = null }) {
     const prompt = (PROMPTS[kind] ?? PROMPTS.message)(link);
-    // A new session in the linked folder (auto mode, the prompt sent), else a chat (powertoys/assist).
+    // A new session in the linked folder (auto mode, the prompt sent), else a chat (powertoys/assist); or the session
+    // picked in the dialog, the prompt sent into it as a share is.
     const folder = settings().folders[teamId] ?? null;
+    if (sessionId && folder) {
+      log(`asked Claude about a ${kind} in session ${sessionId}`);
+      return __webpack_require__("powertoys/assist").toClaude({ prompt, folder, sessionId });
+    }
     await __webpack_require__("powertoys/assist").openClaude(prompt, folder);
     log(`asked Claude about a ${kind} (${folder ? "Code session in the linked folder" : "chat"})`);
     return { folder };
