@@ -120,7 +120,7 @@ patches/files/...           files that are entirely new (written for Powertoys),
   and for saving pages, sign in with an OAuth connection whose redirect URI is
   `http://localhost:47821/notion/callback`, or paste an internal integration's secret; GitHub through the `gh` CLI):
   - **Notion:** link previews (title, path, status, assignees, last edit, first lines; notion.so, notion.site and
-    app.notion.com links); a pasted link goes in at once, and its title, linked, replaces it once known (a Notion
+    app.notion.com links); a pasted link (alone or in pasted text) goes in at once, and its title, linked, replaces it once known (a Notion
     ticket as "ISS-1995 Title", with its database's ID; a GitHub title; or any page's title). Sending a message, or
     saving an edit, with a GitHub link or a pasted one whose title isn't in yet waits for it (up to 10 s), then sends
     it. A ticket ID you type or

@@ -179,7 +179,15 @@
       editor?.removeAttribute("data-powertoys-send");
       const fiberOf = (node) => node?.[Object.keys(node).find((key) => key.startsWith("__reactFiber$"))];
       try {
-        const button = editor?.closest('[data-qa="message_input"]')?.querySelector('[data-qa="texty_send_button"]');
+        // The box's own Send button: in the nearest part of the page around the box that has one (it isn't always
+        // inside the box's message_input), and only while that part holds no other message box (a thread's box and
+        // the channel's each have their own). An edit is saved, never sent: no Send button for it.
+        let button = null;
+        const editing = !!editor?.closest('[data-qa="message_editor"]');
+        for (let at = editing ? null : editor?.parentElement; at && at !== document.body && !button; at = at.parentElement) {
+          if (at.querySelectorAll(".ql-editor").length > 1) break;
+          button = at.querySelector('[data-qa="texty_send_button"]');
+        }
         let send = null;
         for (let fiber = fiberOf(button); fiber; fiber = fiber.return) {
           if (fiber.memoizedProps?.["data-qa"] !== "texty_send_button") break;
@@ -190,7 +198,7 @@
           const save = fiber.memoizedProps?.confirmationSuffixButtons?.onSaveClick;
           if (typeof save === "function") return (save(), answer("saved"));
         }
-        say("link titles: Slack's send wasn't found for this box");
+        say(`link titles: Slack's send wasn't found for this box (${editor ? (editor.closest('[data-qa="message_editor"]') ? "an edit" : button ? "a Send button without its click handler" : "no Send button around it") : "the box is gone"})`);
       } catch (caught) {
         say(`link titles: Slack's send failed: ${caught.message}`);
       }

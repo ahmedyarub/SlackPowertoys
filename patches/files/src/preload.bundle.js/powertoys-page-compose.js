@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------------------------
 // Powertoys (local addition): features of Slack's message box (started by powertoys/page).
 //
-//   - Pasting a link (Notion, GitHub, any page with a title): the link goes in at once, and its title replaces its
-//     text, linked, once known (if it is still in the message box). A message (or an edit) with a GitHub link, or a
+//   - Pasting a link (Notion, GitHub, any page with a title), alone or in text: the link goes in at once, and its
+//     title replaces its text, linked, once known (if it is still in the message box). A message (or an edit) with a GitHub link, or a
 //     pasted one, whose title isn't in yet is held when you send it, up to 10 s, titled, then sent by Slack's own
 //     send (or Save).
 //   - Ticket IDs ("ISS-1780"), typed or pasted, become links to their Notion pages; their text stays the ID.
@@ -19,7 +19,6 @@
   const editorOf = (node) => node?.closest?.('[data-qa="message_input"] .ql-editor, [data-qa="message_editor"] .ql-editor');
 
   // --- Pasting links as titles -----------------------------------------------------------------------------
-  const SINGLE_URL = /^https?:\/\/\S+$/;
   let ownPaste = false;
   // The link goes in at once, as Slack pastes it; once the page's title is known it replaces the link's text, if that
   // is still in the message box (not sent, not edited away) and the box still has the focus. Sending holds for it.
@@ -42,10 +41,16 @@
   async function onPaste(event) {
     const editor = editorOf(event.target);
     if (!editor || ownPaste) return;
-    const text = event.clipboardData?.getData("text/plain")?.trim() ?? "";
-    if (!SINGLE_URL.test(text) || event.clipboardData.getData("text/html")) return;
-    const title = await titleOf(text);
-    if (title) titleLink(editor, text, title);
+    // Every address in what was pasted (a link alone, or with words around it: "@someone please review <link>"), each
+    // titled where it still shows as its address (a link pasted with its own text is left as it is).
+    const text = event.clipboardData?.getData("text/plain") ?? "";
+    const urls = [...new Set([...text.matchAll(/https?:\/\/[^\s<>]+/g)].map(([url]) => url.replace(/[.,;:!?)\]]+$/, "")))];
+    await Promise.all(
+      urls.map(async (url) => {
+        const title = await titleOf(url);
+        if (title) titleLink(editor, url, title);
+      }),
+    );
   }
 
   // Links in the box still showing their address: Slack's link chips, links whose text is their address (with or
