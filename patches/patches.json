@@ -9,7 +9,7 @@
   {
    "path": "mcp/slack-powertoys.mjs",
    "kind": "add",
-   "sha256": "80ec3f51a94addc06aa98787b2d9f871caf587f2e99911857981dbbe44119cd5"
+   "sha256": "b84a90f10d35ae91fe64ccb03a2e9cd928b616242483614a5f3f87e486bc7d28"
   },
   {
    "path": "src/main.bundle.cjs/6440-windows-startup-login-items.js",
@@ -232,7 +232,7 @@
   {
    "path": "src/main.bundle.cjs/powertoys-claude.js",
    "kind": "add",
-   "sha256": "5d72eab7293bf0214a900cad9579ec66de38502bab4f91cc5030bcc0147bb39b"
+   "sha256": "5495c385b4b5ce4490ff42b3935998fbce44202ab372737ff660d60e655daaf0"
   },
   {
    "path": "src/main.bundle.cjs/powertoys-dev.js",
@@ -424,12 +424,12 @@
   {
    "path": "src/preload.bundle.js/powertoys-page-slack.js",
    "kind": "add",
-   "sha256": "2a8689e289f79043ae3b34203542429c0b8cc0c60928a4609ca45855cf259b14"
+   "sha256": "e21d32afdec266c953510389527da26afd20978589bbdebb9f5665f6498281ef"
   },
   {
    "path": "src/preload.bundle.js/powertoys-page.js",
    "kind": "add",
-   "sha256": "40fb3f147a94b55ba4fbc83f538d98ab5eeecdaeccac73ec2c37128cccbbb9c2"
+   "sha256": "be1c2c31d2085e97e620f4c9c44771af8d043e5174d5964736dcb7f1f22478e3"
   }
  ]
 }

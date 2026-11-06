@@ -6,7 +6,8 @@
 // It runs in the preload's isolated world: it reads and changes the page through the DOM, shares the page's storage
 // (same origin), and talks to the main process over IPC ("powertoys:*" channels, see powertoys-main.js).
 //
-// Right-clicking a workspace icon (the switcher button in the left rail, or a workspace in the switcher) shows a
+// Right-clicking a workspace icon (the switcher button, a workspace in the switcher, or any workspace in the left rail's
+// list; Shift+right-click keeps Slack's own menu) shows a
 // small menu: mark everything read in that workspace, or in every workspace (the main process does the marking with
 // Slack's API; Slack's servers then update the sidebar), and link the workspace to a folder for Claude Code.
 // Slack's message menu (right-click a message, or its "More actions") gets "Ask Claude about this": a dropdown picks
@@ -19,13 +20,14 @@
   const electron = __webpack_require__(261);
   const log = (message) => electron.ipcRenderer.send("powertoys:log", String(message));
 
-  // Elements that stand for a workspace, by Slack's test ids.
-  const WORKSPACE_ICON = '[data-qa="account_switcher_team_icon"], [data-qa^="team-switcher"], [data-qa^="team_switcher"]';
+  // Elements that stand for a workspace, by Slack's test ids: the switcher, and every workspace in the left rail's list
+  // of workspaces (team_sidebar_item, data-team its id).
+  const WORKSPACE_ICON = '[data-qa="account_switcher_team_icon"], [data-qa^="team-switcher"], [data-qa^="team_switcher"], [data-qa="team_sidebar_item"]';
 
   /** The workspace an element stands for: its team id (data-team-id, or the current one from the URL) and name. */
   function workspaceOf(element) {
-    const teamId = element.closest("[data-team-id]")?.dataset.teamId ?? /\/client\/([A-Z0-9]+)/.exec(location.pathname)?.[1] ?? null;
-    const label = element.getAttribute("aria-label") ?? element.querySelector("[aria-label]")?.getAttribute("aria-label") ?? "";
+    const teamId = element.closest("[data-team-id]")?.dataset.teamId ?? element.closest("[data-team]")?.dataset.team ?? /\/client\/([A-Z0-9]+)/.exec(location.pathname)?.[1] ?? null;
+    const label = element.getAttribute("aria-label") ?? element.querySelector("[aria-label]")?.getAttribute("aria-label") ?? element.querySelector("img[alt]")?.alt ?? "";
     const name = /\(([^)]+)\)\s*$/.exec(label)?.[1] ?? label.replace(/^Switch workspaces…\s*/, "") ?? "";
     return { teamId, name: name.trim() || "this workspace" };
   }
@@ -586,7 +588,8 @@
       document.addEventListener(
         "contextmenu",
         (event) => {
-          const icon = event.target.closest?.(WORKSPACE_ICON);
+          // Shift+right-click: Slack's own menu.
+          const icon = event.shiftKey ? null : event.target.closest?.(WORKSPACE_ICON);
           if (!icon) return;
           event.preventDefault();
           event.stopPropagation();

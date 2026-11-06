@@ -3,7 +3,8 @@
 //
 // The bridge runs inside Slack, so Slack must be running; its port and token are in
 // %APPDATA%\Slack\powertoys\bridge.json while it runs. It reads with your own Slack session (what you can see in Slack)
-// and writes nothing but drafts: create_slack_draft puts a message in a message box for you to review and send.
+// and writes drafts (create_slack_draft: a message in a message box for you to review and send) and messages sent as
+// you (send_slack_message: text and files, videos too, answered only once Slack shows them).
 //
 // Claude Desktop (%APPDATA%\Claude\claude_desktop_config.json):
 //   "mcpServers": { "slack-powertoys": { "command": "node", "args": ["<this folder>\\slack-powertoys.mjs"] } }
@@ -83,6 +84,33 @@ const TOOLS = [
     run: async ({ target, text, in_thread, workspace }) => {
       const draft = await bridge("POST", "draft", { target, text, inThread: in_thread ?? true, workspace });
       return `Draft created ${draft.where} of ${draft.conversation}${draft.inThread ? " (in the thread)" : ""}. It has not been sent.\n${draft.link}`;
+    },
+  },
+  {
+    name: "send_slack_message",
+    description:
+      "Send a Slack message as the user, right away (not a draft): text, files from this computer, or both (videos and images " +
+      "included; the text goes with the files). It returns only once Slack shows the message in the conversation, with its " +
+      "link; otherwise it fails saying why. With a message link it replies in that message's thread (in_thread false: in the " +
+      "channel); with a channel link or id, it posts in the channel. The text is Markdown (**bold**, *italic*, ~~struck~~, " +
+      "[text](url), # headings, - lists, `code`, ```blocks```), converted to Slack's formatting; format \"mrkdwn\" sends it as " +
+      "Slack mrkdwn unchanged. Only send what the user asked to send.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        target: link("A Slack message link, channel link or channel id"),
+        text: { type: "string", description: "The message (Markdown)" },
+        files: { type: "array", items: { type: "string" }, description: "Absolute paths of files to upload with the message (videos too)" },
+        in_thread: { type: "boolean", description: "For a message link: reply in its thread (default true)" },
+        format: { type: "string", enum: ["markdown", "mrkdwn"], description: "How the text is written (default markdown)" },
+        workspace,
+      },
+      required: ["target"],
+    },
+    run: async ({ target, text, files, in_thread, format, workspace }) => {
+      const sent = await bridge("POST", "send", { target, text, files, inThread: in_thread ?? true, format, workspace });
+      const attached = sent.files.length ? ` with ${sent.files.map((file) => file.name).join(", ")}` : "";
+      return `Sent to ${sent.conversation}${attached}; Slack shows it.\n${sent.link}`;
     },
   },
   {
@@ -280,7 +308,13 @@ async function handle(message) {
       return {
         protocolVersion: message.params?.protocolVersion ?? "2025-06-18",
         capabilities: { tools: {} },
-        serverInfo: { name: "slack-powertoys", version: "1.2.0" },
+        serverInfo: { name: "slack-powertoys", version: "1.3.0" },
+        // Preferred over other Slack connectors' send tools: those have failed silently on videos.
+        instructions:
+          "To send a Slack message (text, files, videos), use send_slack_message from this server rather than any other Slack " +
+          "connector's send tool: it sends with the user's own Slack session, uploads videos and other files the way Slack does, " +
+          "and returns only once Slack shows the message (with its link), failing with a reason otherwise. For a message the " +
+          "user wants to review first, use create_slack_draft. To read Slack, prefer this server's tools too.",
       };
     case "ping":
       return {};

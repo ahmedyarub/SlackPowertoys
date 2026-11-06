@@ -32,9 +32,12 @@ patches/files/...           files that are entirely new (written for Powertoys),
 
 ## What Powertoys adds
 
-- **Mark everything as read**, in every signed-in workspace (a tray menu item) or in one (right-click a workspace
-  icon). It marks each channel, DM and group DM with unreads as read at its latest message, the same Web API calls
+- **Mark everything as read**, in every signed-in workspace (a tray menu item) or in one (right-click any workspace
+  icon, in the switcher or the left rail's list of workspaces; Shift+right-click still opens Slack's own menu). It marks each channel, DM and group DM with unreads as read at its latest message, the same Web API calls
   Slack's own "Mark all as read" makes; Slack then updates its sidebar itself.
+- **A sidebar that hides itself:** the channel sidebar takes no room; point at the left edge and it shows over the
+  conversation (95% opaque), then goes away when you move off it. The pin in its top right corner (where the compose button was)
+  keeps it in place.
 - **Slack for Claude Desktop.** While Slack runs, Powertoys answers on `127.0.0.1`, with a random port and a bearer
   token written to `%APPDATA%\Slack\powertoys\bridge.json` (removed when Slack quits; `{"bridge": false}` in
   `settings.json` turns it off). It uses your own Slack session, so it sees what you see in Slack. A thread read
@@ -50,6 +53,7 @@ patches/files/...           files that are entirely new (written for Powertoys),
   | `get_my_slack_messages` | your own latest messages, so replies can be drafted in your style |
   | `list_slack_saved`, `list_slack_drafts` | your saved items ("Later") and unsent drafts |
   | `create_slack_draft` | puts a draft in a message box (or a thread's) for you to review and send; it never sends |
+  | `send_slack_message` | sends a message as you, with files (videos too) uploaded the way Slack does; Markdown becomes Slack's formatting; it answers only once Slack shows the message, with its link, and fails saying why otherwise |
   | `get_slack_clip_transcript`, `list_slack_clips` | video and audio clips' transcripts ("View transcript") |
   | `request_slack_transcript` | asks Slack to transcribe a video it has no transcript of ("Generate transcript") |
   | `save_slack_file` | downloads a file shared in Slack (a video, an image) for Claude to look at |

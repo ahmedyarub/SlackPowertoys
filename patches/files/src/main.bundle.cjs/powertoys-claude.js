@@ -5,8 +5,8 @@
 //   - serves Slack to Claude: a bridge on 127.0.0.1 (a random port and a bearer token, both in
 //     %APPDATA%\Slack\powertoys\bridge.json while Slack runs) for mcp/slack-powertoys.mjs, the MCP server Claude
 //     Desktop runs. It reads clip and huddle transcripts, threads, unreads, search results, saved items, drafts and your
-//     own messages; it writes only drafts (never sends) and, for Claude Code's hooks, Slackbot reminders to you and your
-//     status;
+//     own messages; it writes drafts, messages sent as you when asked (text and files, videos too, confirmed once
+//     Slack shows them), and, for Claude Code's hooks, Slackbot reminders to you and your status;
 //   - opens Claude from Slack: "Ask Claude" starts a chat, or a Claude Code session in the folder linked to the
 //     workspace (claude://code/new?folder=&q=, claude://claude.ai/new?q=);
 //   - offers a summary when a huddle you were in ends with a transcript;
@@ -694,6 +694,102 @@
     throw new Error(`the draft could not be created (${lastError})`);
   }
 
+  // --- Sending, as you ------------------------------------------------------------------------------------
+  /**
+   * A message sent as you (Slack's own session, what Slack's composer does): text, and files from this computer
+   * (videos too) uploaded the way Slack uploads them (files.getUploadURLExternal, the bytes, files.completeUploadExternal
+   * sharing them with the text as their message). It answers only once Slack shows the message in the conversation (a
+   * file's share is looked for up to 3 minutes, while Slack processes a video), and fails saying why otherwise.
+   * -> { conversation, link, files: [{ id, name }] }
+   */
+  /**
+   * Markdown (what Claude writes) as Slack's mrkdwn: **bold** and __bold__ -> *bold*, *italic* -> _italic_,
+   * ~~struck~~ -> ~struck~, [text](url) -> <url|text>, headings -> bold lines, "- " / "* " / "+ " items -> "• ";
+   * code spans and blocks are kept as they are (a block's language tag dropped). &, < and > are escaped, as Slack wants.
+   */
+  function toMrkdwn(markdown) {
+    const kept = [];
+    const keep = (text) => `\u0000${kept.push(text) - 1}\u0000`;
+    let text = String(markdown).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    text = text.replace(/```[^\n`]*\n([\s\S]*?)```/g, (block, code) => keep(`\`\`\`\n${code.replace(/\n$/, "")}\n\`\`\``)).replace(/`[^`\n]+`/g, keep);
+    text = text.replace(/!?\[([^\]\n]+)\]\(([^)\s]+)\)/g, (link, label, url) => keep(`<${url}|${label.replace(/\|/g, "/")}>`));
+    text = text.replace(/^#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$/gm, (heading, title) => keep(`*${title.replace(/\*\*|__/g, "")}*`));
+    text = text.replace(/^([ \t]*)[-*+][ \t]+/gm, "$1• ");
+    text = text.replace(/(\*\*|__)(?=\S)([^\n]+?)(?<=\S)\1/g, (bold, mark, inner) => keep(`*${inner}*`));
+    text = text.replace(/(^|[^*\w])\*(?=\S)([^*\n]+?)(?<=\S)\*(?![*\w])/g, "$1_$2_");
+    text = text.replace(/~~(?=\S)([^~\n]+?)(?<=\S)~~/g, "~$1~");
+    while (/\u0000\d+\u0000/.test(text)) text = text.replace(/\u0000(\d+)\u0000/g, (marker, index) => kept[Number(index)]);
+    return text;
+  }
+
+  async function sendMessage({ target, text = "", files = [], workspace, inThread = true, format = "markdown" }) {
+    if (format !== "mrkdwn") text = toMrkdwn(text);
+    files = (Array.isArray(files) ? files : [files]).filter(Boolean).map((file) => path.resolve(String(file)));
+    if (!text && !files.length) throw new Error("nothing to send: no text and no files");
+    for (const file of files) if (!fs.existsSync(file) || !fs.statSync(file).isFile()) throw new Error(`no such file: ${file}`);
+    const page = requirePage();
+    const ref = parseRef(target);
+    if (!ref.channel) throw new Error("expected a link to a Slack message or channel, or a channel id");
+    const threadTs = ref.threadTs ?? (inThread ? ref.ts : undefined);
+    const teams = ref.host ? teamsInOrder(await signedInTeams(page), ref.host) : await teamsMatching(page, workspace);
+    // The workspace that has the conversation.
+    let team = null;
+    let lastError = "channel_not_found";
+    for (const each of teams) {
+      const info = await api(page, each, "conversations.info", { channel: ref.channel });
+      if (info.ok) {
+        team = each;
+        break;
+      }
+      lastError = info.error;
+    }
+    if (!team) throw new Error(`the conversation wasn't found (${lastError})`);
+    const conversation = await conversationName(page, team, ref.channel);
+
+    if (!files.length) {
+      const sent = await api(page, team, "chat.postMessage", { channel: ref.channel, text, ...(threadTs && { thread_ts: threadTs }) });
+      if (!sent.ok) throw new Error(`Slack didn't send it (${sent.error})`);
+      log(`sent a message to ${team.id}/${ref.channel}${threadTs ? " (thread)" : ""}`);
+      return { conversation, link: permalink(team, ref.channel, sent.ts, threadTs), files: [] };
+    }
+
+    const uploaded = [];
+    for (const file of files) {
+      const name = path.basename(file);
+      const bytes = fs.readFileSync(file);
+      const slot = await api(page, team, "files.getUploadURLExternal", { filename: name, length: String(bytes.length) });
+      if (!slot.ok) throw new Error(`Slack didn't take ${name} (${slot.error})`);
+      const put = await page.session.fetch(slot.upload_url, { method: "POST", body: bytes });
+      if (!put.ok) throw new Error(`uploading ${name} failed (HTTP ${put.status}: ${(await put.text()).slice(0, 200)})`);
+      uploaded.push({ id: slot.file_id, title: name });
+      log(`uploaded ${name} (${Math.round(bytes.length / 1024)} KB) as ${slot.file_id}`);
+    }
+    const done = await api(page, team, "files.completeUploadExternal", {
+      files: JSON.stringify(uploaded),
+      channel_id: ref.channel,
+      ...(threadTs && { thread_ts: threadTs }),
+      ...(text && { initial_comment: text }),
+    });
+    if (!done.ok) throw new Error(`Slack didn't post the upload (${done.error})`);
+
+    // Shown in the conversation: each file's share there, with its message's time.
+    let ts = null;
+    for (const until = Date.now() + 180000; Date.now() < until; ) {
+      const infos = await Promise.all(uploaded.map((each) => api(page, team, "files.info", { file: each.id })));
+      const failed = infos.find((info) => !info.ok);
+      if (failed) throw new Error(`Slack lost the upload (${failed.error})`);
+      const here = infos.map((info) => info.file?.shares?.public?.[ref.channel] ?? info.file?.shares?.private?.[ref.channel]);
+      if (here.every((each) => each?.length)) {
+        ts = here[0][0].ts;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+    if (!ts) throw new Error(`the upload finished but Slack hasn't shown it in ${conversation} after 3 minutes (files ${uploaded.map((each) => each.id).join(", ")})`);
+    log(`sent ${uploaded.length} file${uploaded.length === 1 ? "" : "s"} to ${team.id}/${ref.channel}${threadTs ? " (thread)" : ""}`);
+    return { conversation, link: permalink(team, ref.channel, ts, threadTs), files: uploaded.map(({ id, title }) => ({ id, name: title })) };
+  }
+
   // --- Claude Code: tell you when a session finishes or needs you ------------------------------------------
   /** The workspace for a folder: the one linked to it (or to a folder containing it), the setting, or the first. */
   async function teamForFolder(page, folder) {
@@ -892,6 +988,7 @@
     "GET /huddles": (q) => listHuddles({ workspace: q.workspace, limit: Math.min(number(q.limit) ?? 20, 100) }),
     "GET /huddle": (q) => huddleTranscript({ huddle: q.huddle }),
     "POST /draft": (q, body) => createDraft(body),
+    "POST /send": (q, body) => sendMessage(body),
     "POST /claude-code": (q, body) => claudeCodeEvent(body),
     "POST /claude-code/permission": (q, body) => __webpack_require__("powertoys/assist").permission(body),
   };

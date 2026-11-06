@@ -19,6 +19,8 @@
 // does: taken out of Slack's open modals (its modal store), and the store told. The notice the one who starts AI notes
 // gets ("Everyone ready to start AI notes?", Start or Cancel) stays.
 // A message powertoys/page-compose held for its links' titles is sent here, by Slack's own send (or an edit's Save).
+// The channel sidebar is collapsed (Slack's own "Toggle sidebar visibility") until pinned, and shown over the
+// conversation when the pointer reaches the workspace's left edge; the pin replaces the sidebar's compose button.
 // ---------------------------------------------------------------------------------------------
 (function (module, exports, __webpack_require__) {
   "use strict";
@@ -40,6 +42,8 @@
       tabs: ['"Set selected tab"', '"Upsert huddle object"'],
       client: ["function dispatchForClientStore"],
       modals: ['"Sets a flag that will prevent the video recorder modal from being closed"', "modalsByTeamAndWindow"],
+      // Not needed for the captions (looked for apart): the sidebar's own show/hide (what Ctrl+Shift+D does).
+      sidebar: ['"Toggle sidebar visibility"', "createThunkToggleSidebar"],
     };
     const ids = {};
     const scanned = new Set();
@@ -57,7 +61,7 @@
     let found = null;
     function find() {
       scan();
-      if (Object.keys(WANTED).some((key) => !ids[key])) return null;
+      if (Object.keys(WANTED).some((key) => key !== "sidebar" && !ids[key])) return null;
       // Loaded the way Slack loads them (already loaded: their exports as they are).
       const [stores, captions, tabs, client, modals] = ["stores", "captions", "tabs", "client", "modals"].map((key) => load(ids[key]));
       const parts = {
@@ -205,6 +209,134 @@
       answer("");
     });
 
+    // --- The sidebar hides itself until pinned ----------------------------------------------------------------
+    // Unpinned, Slack keeps the channel sidebar collapsed (Slack's own "Toggle sidebar visibility", what Ctrl+Shift+D
+    // does, so it takes no room), and pointing at the workspace's left edge shows it over the conversation (the
+    // collapsed sidebar, still in the page, made visible on top at 95% opacity, at the width it last had); it goes away once the
+    // pointer has been off it for 0.7 s (not while one of Slack's menus or popovers is open). A pin in the sidebar's
+    // top right corner, where the compose button was, keeps it shown in its column (remembered).
+    const PINNED = "powertoysSidebarPinned";
+    const WIDTH = "powertoysSidebarWidth";
+    const remembered = (key) => {
+      try {
+        return localStorage.getItem(key);
+      } catch {
+        return null;
+      }
+    };
+    const remember = (key, value) => {
+      try {
+        localStorage.setItem(key, value);
+      } catch {}
+    };
+    let pinned = remembered(PINNED) === "1";
+    let toggleSidebar = null;
+    const SIDEBAR = ".p-view_contents--sidebar";
+    const isCollapsed = () => document.querySelector(".p-ia4_client")?.classList.contains("p-ia4_client--sidebar-collapsed") ?? null;
+    const peeking = () => document.documentElement.classList.contains("powertoys-sidebar-peek");
+    /** Slack's own show/hide, in the client's store, else (no change seen) in the workspace's. */
+    function showInColumn(visible) {
+      if (!ids.sidebar) scan();
+      if (!toggleSidebar && ids.sidebar) toggleSidebar = exported(load(ids.sidebar), (value) => value.meta?.key === "createThunkToggleSidebar");
+      if (!toggleSidebar || !found || isCollapsed() === !visible) return;
+      found.dispatchForClient(toggleSidebar({ isSidebarVisible: visible }));
+      setTimeout(() => {
+        if (isCollapsed() === !visible) return;
+        const team = /\/client\/([A-Z0-9]+)/.exec(location.pathname)?.[1];
+        const map = found.storeMap();
+        (map instanceof Map ? map.get(team) : map?.[team])?.dispatch(toggleSidebar({ isSidebarVisible: visible }));
+      }, 150);
+    }
+    /** The collapsed sidebar over the conversation, from the workspace's left edge, or not. */
+    function peek(on) {
+      const root = document.documentElement;
+      if (on) {
+        const layout = document.querySelector(".p-client_workspace__layout")?.getBoundingClientRect();
+        if (!layout) return;
+        root.style.setProperty("--powertoys-sidebar-left", `${layout.left}px`);
+        root.style.setProperty("--powertoys-sidebar-top", `${layout.top}px`);
+        root.style.setProperty("--powertoys-sidebar-width", `${Number(remembered(WIDTH)) || 260}px`);
+      }
+      root.classList.toggle("powertoys-sidebar-peek", on);
+    }
+    const style = document.createElement("style");
+    style.dataset.powertoys = "sidebar";
+    style.textContent = `
+      html.powertoys-sidebar-peek .p-ia4_client--sidebar-collapsed ${SIDEBAR} {
+        display: flex !important; visibility: visible !important; pointer-events: auto !important;
+        position: fixed !important; z-index: 300; left: var(--powertoys-sidebar-left); top: var(--powertoys-sidebar-top);
+        bottom: 0; width: var(--powertoys-sidebar-width); max-height: none !important; opacity: 0.95;
+        box-shadow: 0 0 0 1px rgba(255,255,255,.1), 8px 0 24px rgba(0,0,0,.35); }
+      ${SIDEBAR} [data-qa="composer_button"] { visibility: hidden !important; }`;
+
+    const pin = document.createElement("button");
+    pin.dataset.powertoys = "sidebar-pin";
+    pin.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M10.5 1.5l4 4-1.4.6-2.4 2.4.4 3.6-1.1 1.1-2.6-2.6L3.6 14.4l-.9-.1-.1-.9 3.8-3.8-2.6-2.6 1.1-1.1 3.6.4 2.4-2.4z"/></svg>';
+    Object.assign(pin.style, { position: "fixed", zIndex: 301, padding: "0", border: "0", borderRadius: "4px", background: "transparent",
+      cursor: "pointer", display: "none", alignItems: "center", justifyContent: "center" });
+    /** The pin where the compose button is (or the sidebar's top right corner), while the sidebar shows. */
+    const placePin = () => {
+      const sidebar = document.querySelector(SIDEBAR);
+      const box = sidebar?.getBoundingClientRect();
+      if (!box?.width || (isCollapsed() && !peeking())) return (pin.style.display = "none");
+      if (!isCollapsed()) remember(WIDTH, String(Math.round(box.width)));
+      const compose = sidebar.querySelector('[data-qa="composer_button"]')?.getBoundingClientRect();
+      const at = compose?.width ? compose : { left: box.right - 40, top: box.top + 10, width: 28, height: 28 };
+      Object.assign(pin.style, { display: "flex", left: `${at.left}px`, top: `${at.top}px`, width: `${at.width}px`, height: `${at.height}px`,
+        opacity: pinned ? "1" : "0.7", transform: pinned ? "none" : "rotate(45deg)" });
+      pin.style.color = pinned ? "#1d9bd1" : getComputedStyle(sidebar).color;
+      pin.title = pinned ? "Unpin the sidebar (it shows when you point at the left edge)" : "Pin the sidebar (it stays shown)";
+      pin.setAttribute("aria-label", pin.title);
+      pin.setAttribute("aria-pressed", String(pinned));
+    };
+    pin.addEventListener("mouseenter", () => (pin.style.background = "rgba(255,255,255,.12)"));
+    pin.addEventListener("mouseleave", () => (pin.style.background = "transparent"));
+    pin.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      pinned = !pinned;
+      remember(PINNED, pinned ? "1" : "0");
+      peek(false);
+      showInColumn(pinned);
+      say(`sidebar: ${pinned ? "pinned" : "unpinned (shows over the conversation when you point at the left edge)"}`);
+      setTimeout(placePin, 200);
+    });
+
+    let hideTimer = null;
+    let pointerFrame = 0;
+    document.addEventListener(
+      "mousemove",
+      (event) => {
+        if (pointerFrame) return;
+        pointerFrame = requestAnimationFrame(() => {
+          pointerFrame = 0;
+          if (pinned || !found) return;
+          const { clientX: x, clientY: y } = event;
+          if (!peeking()) {
+            const layout = document.querySelector(".p-client_workspace__layout")?.getBoundingClientRect();
+            if (layout && isCollapsed() && x >= layout.left - 6 && x <= layout.left + 10 && y >= layout.top) (peek(true), placePin());
+            return;
+          }
+          const box = document.querySelector(SIDEBAR)?.getBoundingClientRect();
+          const over = box && x <= box.right + 16;
+          const menuOpen = document.querySelector('[role="menu"], .c-popover, .ReactModal__Overlay--after-open');
+          if (over || menuOpen) return (clearTimeout(hideTimer), (hideTimer = null));
+          hideTimer ??= setTimeout(() => {
+            hideTimer = null;
+            if (!pinned) (peek(false), placePin());
+          }, 700);
+        });
+      },
+      true,
+    );
+    const startSidebar = () => {
+      document.head.appendChild(style);
+      document.body.appendChild(pin);
+      if (!pinned) showInColumn(false);
+      setInterval(() => (pin.isConnected || document.body.appendChild(pin), placePin()), 500);
+      say(`sidebar: ${ids.sidebar ? "Slack's show/hide found" : "Slack's show/hide wasn't found yet"}; ${pinned ? "pinned" : "shows over the conversation when you point at the left edge"}`);
+    };
+
     // Slack's modules arrive as its code loads: looked for every 2 s for 3 minutes; the stores, then every 10 s.
     let tries = 0;
     const look = setInterval(() => {
@@ -218,6 +350,7 @@
         say("captions: Slack's caption, tab and modal actions found");
         watch();
         setInterval(watch, 10000);
+        startSidebar();
       } else if (++tries > 90) {
         clearInterval(look);
         say("captions: Slack's caption actions weren't found; captions are left as Slack sets them");
