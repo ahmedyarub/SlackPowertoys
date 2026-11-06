@@ -1,5 +1,5 @@
 {
- "app": "Slack 4.53.276 for Windows",
+ "app": "Slack 4.53.280 for Windows",
  "files": [
   {
    "path": "mcp/claude-code-hook.mjs",
@@ -49,8 +49,8 @@
   {
    "path": "src/main.bundle.cjs/65031-main/0041.js",
    "kind": "edit",
-   "baseSha256": "536b4a37ad9884d46f239f51703ed1dc9e3a67c5ca02b48b07b9b572e284934a",
-   "resultSha256": "0cf11623a8a8f36cb0ba1df3b656540e7d7bff7656fdcde811726f05a4a9b9d6",
+   "baseSha256": "b913406936383a31a49c336279b264a10a7edc676dba9b44d2dbe20207f25997",
+   "resultSha256": "2576d7651a009bb2a498f63cfa1cd5034e7e8ccd35f6e6ffc6b2cd6d1e2bbb09",
    "hunks": [
     {
      "at": 299,
@@ -267,8 +267,8 @@
   {
    "path": "src/preload.bundle.js/_bundle.json",
    "kind": "edit",
-   "baseSha256": "400047c1c86bd768c9c0bb5d39ada8c1be1b7861cc8bcfa83bc3de143cd7d761",
-   "resultSha256": "3e13c46667500dc1264d68e52df986961350611c87a6c4413df72dfe7115f1fb",
+   "baseSha256": "a034437a3b903ebe5a73fe2fb57f7a031786f8b39b8e586d5ebdd7ce9c1a5853",
+   "resultSha256": "41f862c2c2168e0a1faab6e814cef0bfe38fde9fe432e70d01712b5eed597d9a",
    "hunks": [
     {
      "at": 2938,
@@ -377,11 +377,11 @@
   {
    "path": "src/preload.bundle.js/_runtime.js",
    "kind": "edit",
-   "baseSha256": "2b35460d634c524a6331c9f0f242d52c64d2f71ffdd9df36c641e652c83626f6",
-   "resultSha256": "79bd9c58fd54d1236ac34c20d8e039db022a0457cbfedc0b58809310cd75ec48",
+   "baseSha256": "9a5ffda21a4f4c9b5e0dbd0c492d9512e05c6affcd8117cec577ed007a58cd14",
+   "resultSha256": "025d56fdddd679e1e7240dc096e17a1e8da2f8971b68d55ab8f250d085cd4d25",
    "hunks": [
     {
-     "at": 5787,
+     "at": 5796,
      "remove": 0,
      "add": [
       [
