@@ -424,7 +424,7 @@
   {
    "path": "src/preload.bundle.js/powertoys-page-slack.js",
    "kind": "add",
-   "sha256": "e21d32afdec266c953510389527da26afd20978589bbdebb9f5665f6498281ef"
+   "sha256": "6484ea8ca434367c0e681928e0271f84099ebd61b141ff251b115df10f570935"
   },
   {
    "path": "src/preload.bundle.js/powertoys-page.js",

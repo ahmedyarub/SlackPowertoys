@@ -258,6 +258,14 @@
         root.style.setProperty("--powertoys-sidebar-width", `${Number(remembered(WIDTH)) || 260}px`);
       }
       root.classList.toggle("powertoys-sidebar-peek", on);
+      if (on && !peek.logged) {
+        peek.logged = true;
+        const sidebar = document.querySelector(SIDEBAR);
+        if (sidebar) {
+          const seen = getComputedStyle(sidebar);
+          say(`sidebar: shown over the conversation (opacity ${seen.opacity}, background ${seen.backgroundColor} / ${seen.backgroundImage.slice(0, 120)})`);
+        }
+      }
     }
     const style = document.createElement("style");
     style.dataset.powertoys = "sidebar";
@@ -266,6 +274,9 @@
         display: flex !important; visibility: visible !important; pointer-events: auto !important;
         position: fixed !important; z-index: 300; left: var(--powertoys-sidebar-left); top: var(--powertoys-sidebar-top);
         bottom: 0; width: var(--powertoys-sidebar-width); max-height: none !important; opacity: 0.95;
+        /* Slack's sidebar takes its colour from the theme layer behind its column, often see-through: here, over the
+           conversation, its theme colour goes on Slack's solid base colour. */
+        background: linear-gradient(var(--dt_color-theme-surf-inv-sec), var(--dt_color-theme-surf-inv-sec)), var(--dt_color-base-pry, #1a1d21) !important;
         box-shadow: 0 0 0 1px rgba(255,255,255,.1), 8px 0 24px rgba(0,0,0,.35); }
       ${SIDEBAR} [data-qa="composer_button"] { visibility: hidden !important; }`;
 
