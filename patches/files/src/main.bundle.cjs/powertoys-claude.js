@@ -865,6 +865,21 @@
     return { folder };
   }
 
+  /**
+   * A message's link from Slack (chat.getPermalink), for a message the page shows without its timestamp link: a
+   * reply's link names its thread.
+   */
+  async function messageLink({ teamId, channel, ts }) {
+    const page = requirePage();
+    const teams = await signedInTeams(page);
+    for (const team of [...teams.filter((team) => team.id === teamId), ...teams.filter((team) => team.id !== teamId)]) {
+      const answer = await api(page, team, "chat.getPermalink", { channel, message_ts: ts });
+      if (answer.ok) return answer.permalink;
+      log(`permalink of ${channel}/${ts} in ${team.id}: ${answer.error}`);
+    }
+    throw new Error("Slack gave no link for that message");
+  }
+
   async function linkFolder(event, teamId) {
     const window = electron.BrowserWindow.fromWebContents(event.sender);
     const current = settings().folders[teamId];
@@ -1044,6 +1059,7 @@
   exports.start = function start() {
     if (readSettings().bridge) startBridge();
     electron.ipcMain.handle("powertoys:ask-claude", (event, request) => askClaude(request));
+    electron.ipcMain.handle("powertoys:permalink", (event, request) => messageLink(request));
     electron.ipcMain.handle("powertoys:claude-folder", (event, teamId) => settings().folders[teamId] ?? null);
     electron.ipcMain.handle("powertoys:link-folder", (event, teamId) => linkFolder(event, teamId));
     electron.ipcMain.handle("powertoys:unlink-folder", (event, teamId) => unlinkFolder(teamId));

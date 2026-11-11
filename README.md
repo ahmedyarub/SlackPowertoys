@@ -66,9 +66,9 @@ patches/files/...           files that are entirely new (written for Powertoys),
     "slack-powertoys": { "command": "C:/Program Files/nodejs/node.exe", "args": ["<your-copy>/mcp/slack-powertoys.mjs"] }
   }
   ```
-- **Ask Claude about this**, in Slack's message menu (right-click a message, or its "More actions"): opens Claude
-  Desktop with the message's link and a prompt to read it (with its thread and any clip transcripts) through the tools
-  above. If the workspace is linked to a folder, a dropdown first picks one of your Claude Code sessions there, or a
+- **Ask Claude about this**, in Slack's message menu on any message (channels, threads, the Threads view, search;
+  right-click it, or its "More actions"): opens Claude Desktop with the message's link and a prompt to read it (with
+  its thread and any clip transcripts) through the tools above. If the workspace is linked to a folder, a dropdown first picks one of your Claude Code sessions there, or a
   new one; otherwise a chat. "Summarize with Claude" and a code block's "Send to Claude Code" pick the same way, and
   a new session starts without asking you to trust the folder.
 - **A folder per workspace:** right-click a workspace icon, "Link a folder for Claude…" (kept in `settings.json`
@@ -205,7 +205,7 @@ nothing of that file is in the patch. The patcher reconstructs the edited file f
 
 ## What the patches apply to
 
-The patches are for **Slack 4.53.280 for Windows**, laid out as the paths in `patches.json` show. Every edited file is
+The patches are for **Slack 4.53.287 for Windows**, laid out as the paths in `patches.json` show. Every edited file is
 checked by SHA-256, so the patches apply only to byte-identical files and refuse anything else.
 
 ## Applying them

@@ -348,19 +348,29 @@
 
   // --- Items in Slack's message menu ----------------------------------------------------------------------
   // Slack draws the menu (.p-message_actions_menu) when a message is right-clicked or its "More actions" clicked; the
-  // message is the list item the click was in, and its timestamp link is its permalink. Page modules add items with
-  // addMessageMenuItem({ label, show(message), run(message), inFileMenu }); a message is { link, teamId, text,
+  // message is the one the click was in: every message, in a channel, a thread, the Threads view or search, is a
+  // message_container with its ts and channel (data-msg-ts, data-msg-channel-id). Its link is its timestamp link, or
+  // when the page shows none, Slack's own permalink for it (fetched when an item is pressed). Page modules add items
+  // with addMessageMenuItem({ label, show(message), run(message), inFileMenu }); a message is { link, teamId, text,
   // element }. inFileMenu: also in the menu of a file in the message (its ⋮).
   let lastMessage = null;
   function rememberMessage(event) {
-    const item = event.target.closest?.('[data-qa="virtual-list-item"]');
-    const ts = item?.dataset.itemKey;
-    if (!ts || !/^\d{10}\.\d{6}$/.test(ts)) return;
+    const container = event.target.closest?.('[data-qa="message_container"][data-msg-ts][data-msg-channel-id]');
+    if (!container) return;
+    const { msgTs: ts, msgChannelId: channel } = container.dataset;
+    const element = container.closest('[data-qa="virtual-list-item"]') ?? container;
     const digits = `p${ts.replace(".", "")}`;
-    const link = [...item.querySelectorAll('a[href*="/archives/"]')].find((anchor) => anchor.pathname.endsWith(digits))?.href;
-    if (!link) return;
-    const text = item.querySelector('[data-qa="message-text"]')?.innerText ?? "";
-    lastMessage = { link, teamId: workspaceOf(item).teamId, text, element: item, at: Date.now() };
+    const link = [...element.querySelectorAll('a[href*="/archives/"]')].find((anchor) => anchor.pathname.endsWith(digits))?.href ?? null;
+    const text = container.querySelector('[data-qa="message-text"]')?.innerText ?? "";
+    lastMessage = { link, channel, ts, teamId: workspaceOf(element).teamId, text, element, at: Date.now() };
+  }
+
+  /** The message with its link: Slack's permalink when the page showed no timestamp link for it. */
+  async function withLink(message) {
+    if (message.link) return message;
+    message.link = await electron.ipcRenderer.invoke("powertoys:permalink", { teamId: message.teamId, channel: message.channel, ts: message.ts });
+    log(`message menu: ${message.channel}/${message.ts} had no timestamp link; Slack's permalink used`);
+    return message;
   }
 
   const SPARKLE =
@@ -398,6 +408,7 @@
     box.setAttribute("aria-label", "Powertoys");
     const plain = [...menu.querySelectorAll('[role="menuitem"]')].find((item) => !/--highlighted/.test(item.className));
     const style = plain ? getComputedStyle(plain) : null;
+    const press = (item) => withLink(message).then(item.run, (caught) => notice(`Couldn't get the message's link: ${reason(caught)}`));
     for (const item of wanted) {
       const button = document.createElement("button");
       button.setAttribute("role", "menuitem");
@@ -411,7 +422,7 @@
         event.preventDefault();
         box.remove();
         if (underMenu === box) underMenu = null;
-        item.run(message);
+        press(item);
       });
       // The keyboard: Enter or Space on a focused item.
       button.addEventListener("keydown", (event) => {
@@ -419,7 +430,7 @@
         event.preventDefault();
         box.remove();
         if (underMenu === box) underMenu = null;
-        item.run(message);
+        press(item);
       });
       box.append(button);
     }

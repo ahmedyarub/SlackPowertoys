@@ -1,5 +1,5 @@
 {
- "app": "Slack 4.53.280 for Windows",
+ "app": "Slack 4.53.287 for Windows",
  "files": [
   {
    "path": "mcp/claude-code-hook.mjs",
@@ -10,6 +10,40 @@
    "path": "mcp/slack-powertoys.mjs",
    "kind": "add",
    "sha256": "b84a90f10d35ae91fe64ccb03a2e9cd928b616242483614a5f3f87e486bc7d28"
+  },
+  {
+   "path": "src/main.bundle.cjs/24286-main/0041.js",
+   "kind": "edit",
+   "baseSha256": "1b393a50703c59615d25ffcea8a0de07c5582321f12593922c4127e944221f1d",
+   "resultSha256": "e8a9846609a6dc6cf2af89f37cf61437d3393dfba0e16accf204d436e8d43248",
+   "hunks": [
+    {
+     "at": 299,
+     "remove": 0,
+     "add": [
+      [
+       "      __webpack_require__(\"powertoys/main\").addTrayItems(menu); // Local change: Powertoys (powertoys-main.js)\n"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "path": "src/main.bundle.cjs/24286-main/0056.js",
+   "kind": "edit",
+   "baseSha256": "56a8f6d3cbaafde46e071199b80c39cc4836b3ad88b1562a7f7a220236be32cf",
+   "resultSha256": "7ecfae2c0430115b2b865a7613318f5b959ea644bf4cb7656aad3d23f4e75d1f",
+   "hunks": [
+    {
+     "at": 198,
+     "remove": 0,
+     "add": [
+      [
+       "      __webpack_require__(\"powertoys/main\").start(store); // Local change: Powertoys (powertoys-main.js)\n"
+      ]
+     ]
+    }
+   ]
   },
   {
    "path": "src/main.bundle.cjs/6440-windows-startup-login-items.js",
@@ -47,44 +81,10 @@
    ]
   },
   {
-   "path": "src/main.bundle.cjs/65031-main/0041.js",
-   "kind": "edit",
-   "baseSha256": "b913406936383a31a49c336279b264a10a7edc676dba9b44d2dbe20207f25997",
-   "resultSha256": "2576d7651a009bb2a498f63cfa1cd5034e7e8ccd35f6e6ffc6b2cd6d1e2bbb09",
-   "hunks": [
-    {
-     "at": 299,
-     "remove": 0,
-     "add": [
-      [
-       "      __webpack_require__(\"powertoys/main\").addTrayItems(menu); // Local change: Powertoys (powertoys-main.js)\n"
-      ]
-     ]
-    }
-   ]
-  },
-  {
-   "path": "src/main.bundle.cjs/65031-main/0056.js",
-   "kind": "edit",
-   "baseSha256": "7efb91bdbf50c44bd7c56c54ec0d7a0f48f4372167ed1e96bedb29e75b3c2baa",
-   "resultSha256": "7c208a675315fd8d0e977176cc3f95a4260f8516d120e991558ab9f027f7b8a4",
-   "hunks": [
-    {
-     "at": 198,
-     "remove": 0,
-     "add": [
-      [
-       "      __webpack_require__(\"powertoys/main\").start(store); // Local change: Powertoys (powertoys-main.js)\n"
-      ]
-     ]
-    }
-   ]
-  },
-  {
    "path": "src/main.bundle.cjs/_bundle.json",
    "kind": "edit",
-   "baseSha256": "24a3f8c0b77a535fed183c68ced0b306b0e45d0fbcce1260d1d9b90e471abf98",
-   "resultSha256": "b55d76f0ccb927899e2bf3662cd7d8067d11107a017562e9741f04adb24bbedd",
+   "baseSha256": "5cafe9ab68e4d81fc8e73a89a19003f90a24486c38d4e5c3711d0887b45658e7",
+   "resultSha256": "9fd8cecefb58ce1a3bd24e0ae61df47f43a90a919922d2431545ca94b9d95a0d",
    "hunks": [
     {
      "at": 6061,
@@ -232,7 +232,7 @@
   {
    "path": "src/main.bundle.cjs/powertoys-claude.js",
    "kind": "add",
-   "sha256": "5495c385b4b5ce4490ff42b3935998fbce44202ab372737ff660d60e655daaf0"
+   "sha256": "d567d0cba17a4ad6fadaf2a97b2e2a70e40bfe3bcfd75579f21fb02cf85da163"
   },
   {
    "path": "src/main.bundle.cjs/powertoys-dev.js",
@@ -377,11 +377,11 @@
   {
    "path": "src/preload.bundle.js/_runtime.js",
    "kind": "edit",
-   "baseSha256": "9a5ffda21a4f4c9b5e0dbd0c492d9512e05c6affcd8117cec577ed007a58cd14",
-   "resultSha256": "025d56fdddd679e1e7240dc096e17a1e8da2f8971b68d55ab8f250d085cd4d25",
+   "baseSha256": "0403eb0f6d401cef8a681301d7ed72031ffef95ea0a1bd74e343d4cda33587d8",
+   "resultSha256": "3cbb3e256d89f56b84f97bd1d934c73948e46863b57055b3afa1bd514947e228",
    "hunks": [
     {
-     "at": 5796,
+     "at": 5871,
      "remove": 0,
      "add": [
       [
@@ -429,7 +429,7 @@
   {
    "path": "src/preload.bundle.js/powertoys-page.js",
    "kind": "add",
-   "sha256": "be1c2c31d2085e97e620f4c9c44771af8d043e5174d5964736dcb7f1f22478e3"
+   "sha256": "198f89fdbb5090681368302723ef37fb10daa22f0307c011e557cd743d063e68"
   }
  ]
 }
