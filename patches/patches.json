@@ -1,5 +1,5 @@
 {
- "app": "Slack 4.53.287 for Windows",
+ "app": "Slack 4.53.292 for Windows",
  "files": [
   {
    "path": "mcp/claude-code-hook.mjs",
@@ -14,8 +14,8 @@
   {
    "path": "src/main.bundle.cjs/24286-main/0041.js",
    "kind": "edit",
-   "baseSha256": "1b393a50703c59615d25ffcea8a0de07c5582321f12593922c4127e944221f1d",
-   "resultSha256": "e8a9846609a6dc6cf2af89f37cf61437d3393dfba0e16accf204d436e8d43248",
+   "baseSha256": "7e71062c46d3d33b289bdffc68133923fabd9d74f5fb1f86ff6a4b8897f3cb6f",
+   "resultSha256": "14bc7a210d9ddbb9ffb0be26f157a322196ac3ed420a61ac50edb216d00880ad",
    "hunks": [
     {
      "at": 299,
@@ -31,11 +31,11 @@
   {
    "path": "src/main.bundle.cjs/24286-main/0056.js",
    "kind": "edit",
-   "baseSha256": "56a8f6d3cbaafde46e071199b80c39cc4836b3ad88b1562a7f7a220236be32cf",
-   "resultSha256": "7ecfae2c0430115b2b865a7613318f5b959ea644bf4cb7656aad3d23f4e75d1f",
+   "baseSha256": "cf2cadc358403339179351da35777498356f0f0bf27790236d6f6dd70f108c88",
+   "resultSha256": "463103fecabfdc6f2850ab857ed6cc9fc6edaf2ab7252f4a5aac573729d35e02",
    "hunks": [
     {
-     "at": 198,
+     "at": 211,
      "remove": 0,
      "add": [
       [
@@ -227,7 +227,7 @@
   {
    "path": "src/main.bundle.cjs/powertoys-brief.js",
    "kind": "add",
-   "sha256": "8d39aeb6dc7c738a4486c8e25c212f33a105322d53cbc5032fc768f7385ea9de"
+   "sha256": "8fbd92c0d8e3ab49bf45b7ae06b34cfcad7b7bb3d53db299d26fd00a3320d08b"
   },
   {
    "path": "src/main.bundle.cjs/powertoys-claude.js",
@@ -247,7 +247,7 @@
   {
    "path": "src/main.bundle.cjs/powertoys-huddle.js",
    "kind": "add",
-   "sha256": "6acae9fd437c3f8639af19545cd1c8f609f94199b38f8a483318a28204201d56"
+   "sha256": "acabb405a15e2f5fa58ce77944a14112ef0947cf0e8ff32ac222f4769b03859a"
   },
   {
    "path": "src/main.bundle.cjs/powertoys-main.js",
@@ -377,8 +377,8 @@
   {
    "path": "src/preload.bundle.js/_runtime.js",
    "kind": "edit",
-   "baseSha256": "0403eb0f6d401cef8a681301d7ed72031ffef95ea0a1bd74e343d4cda33587d8",
-   "resultSha256": "3cbb3e256d89f56b84f97bd1d934c73948e46863b57055b3afa1bd514947e228",
+   "baseSha256": "ef9383cc9952b59a0e5155ef55338b01f21e4a59a9819c2c089d236119bd8c94",
+   "resultSha256": "3c940031b1b418a5c87b21cd534d208480990fce782226619c1d501348b00380",
    "hunks": [
     {
      "at": 5871,

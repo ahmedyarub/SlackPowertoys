@@ -84,9 +84,9 @@ patches/files/...           files that are entirely new (written for Powertoys),
   "Claude session" dropdown in the captions panel picks one of your Claude Code sessions in the workspace's folder,
   or a new one (the default). Double-click a caption, select several and press **Ask Claude**, or right-click: the
   question goes into that conversation in Claude Desktop, where you read the answer: the huddle window only shows a
-  faint chip saying it was asked. **Ask** opens a box to type a question. A question someone asks you by name (or any
-  question, when it's just the two of you) goes to that conversation as soon as it has been fully asked. **Follow** (off
-  until you click it) sends the call's finished sentences to that conversation as it goes, and Claude speaks up only
+  faint chip saying it was asked. **Ask** opens a box to type a question. While **Follow** is on (and only then), a question
+  someone asks you by name (or any question, when it's just the two of you) goes to that conversation as soon as it
+  has been fully asked; turning Follow off drops one still being heard. **Follow** (off until you click it) also sends the call's finished sentences to that conversation as it goes, and Claude speaks up only
   when something needs correcting or saying. Those checks run on Haiku; anything that needs a deep investigation goes
   to the same conversation on Opus; what it says shows in a pop-up you can drag. The Brief can be dragged too, and Slack can't be quit during a
   huddle. While the call is recorded, the caption lines go with their time in the recording,
@@ -162,12 +162,11 @@ patches/files/...           files that are entirely new (written for Powertoys),
   whenever it changes a lot (a new slide, another shared screen). Share with Claude hands all three over before the
   video. **Propose tickets** asks the session you pick for comments and new tickets in your Notion Issues database,
   creating nothing until you approve each one.
-- **Brief:** a faint "Brief" chip in the huddle window. In the daily standup it lists, since noon of the previous
-  working day, each ticket of yours with a PR, a status change or a release: one line with its ID and name, where it
-  is (Production, UAT, Dev, Code review, In progress), what it was before, and its PRs. Then what you're on today,
-  what waits on a deploy or testing, and whether anything is blocked
-  (`"standup": {"channel", "time", "releaseChannel", "githubUser"}`). In other calls: what's
-  open with that person or channel lately, the tickets mentioned and their status, and the last recorded call.
+- **Brief:** a faint "Brief" chip in the huddle window, the same in every huddle at any time: your tickets with a
+  PR, a status change or a release in the past 24 hours, under a heading per status (Production with its release,
+  UAT, Acceptance testing, Dev, Done, Code review, In progress, Blocked), one line each: the ticket ID as a link, its
+  name in bold, what it was before, and its PRs (merged, open, closed); then PRs without a ticket. Laid out by code,
+  no model (`"standup": {"releaseChannel", "githubUser"}`).
 - **Tickets next to messages** (Notion read as you; `"notion": {"issues", "people", "ticketPrefix"}`): pointing at a
   ticket ID like "ISS-1780" in a message shows its title and status, and clicking it opens it; **Link to a ticket**
   in the message menu adds the thread's link to the ticket it's about, after you confirm the comment; a thread that
@@ -197,15 +196,15 @@ nothing of that file is in the patch. The patcher reconstructs the edited file f
 
 | File | What it does |
 |---|---|
-| `src/main.bundle.cjs/33229-main/0050.js` | One line after the app's start-up returns its store: `__webpack_require__("powertoys/main").start(appStore)`. |
-| `src/main.bundle.cjs/33229-main/0037.js` | One line in the tray menu's builder, before Preferences: `__webpack_require__("powertoys/main").addTrayItems(menu)`. |
+| `src/main.bundle.cjs/24286-main/0056.js` | One line after the app's start-up returns its store: `__webpack_require__("powertoys/main").start(store)`. |
+| `src/main.bundle.cjs/24286-main/0041.js` | One line in the tray menu's builder, before Preferences: `__webpack_require__("powertoys/main").addTrayItems(menu)`. |
 | `src/main.bundle.cjs/6440-windows-startup-login-items.js` | Windows auto-start: when there is no `slack.exe` one folder up, register the running executable with `--startup` only. |
 | `src/preload.bundle.js/_runtime.js` | One line after the preload creates its store: `webpackRequire("powertoys/page").start(store)`. |
 | `src/main.bundle.cjs/_bundle.json`, `src/preload.bundle.js/_bundle.json` | Add the new modules to their bundles. |
 
 ## What the patches apply to
 
-The patches are for **Slack 4.53.287 for Windows**, laid out as the paths in `patches.json` show. Every edited file is
+The patches are for **Slack 4.53.292 for Windows**, laid out as the paths in `patches.json` show. Every edited file is
 checked by SHA-256, so the patches apply only to byte-identical files and refuse anything else.
 
 ## Applying them

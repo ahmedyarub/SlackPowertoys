@@ -12,9 +12,9 @@
 //     the dropdown's (queued there; with "(New session)", a new conversation opens with it); its answer is read in
 //     Claude Desktop, not shown here (a faint chip says it was asked, or why it couldn't be); while recording, its
 //     caption lines carry their time in the recording, with where the video is, so the session can take a frame then;
-//   - a question asked of you (someone says your first name and asks, or anyone asks in a huddle of just the two of
-//     you), once fully asked, goes into that same conversation the same way ("huddle": { "autoAnswer": false } turns
-//     it off);
+//   - while Follow is on, a question asked of you (someone says your first name and asks, or anyone asks in a huddle
+//     of just the two of you), once fully asked, goes into that same conversation the same way ("huddle":
+//     { "autoAnswer": false } turns it off even then);
 //   - "Follow" (off until clicked): the call's finished lines go into that conversation every 20 s on Haiku, and Claude
 //     says something only when something needs correcting or saying (else NOTHING, which shows nothing); what needs a
 //     deep investigation goes to the same conversation on Opus; everything goes through Claude Desktop (queuePrompt
@@ -131,6 +131,8 @@
       .answer .text { padding: 6px 12px 4px; font-size: 14px; }
       .answer .text p { margin: 0 0 6px; }
       .answer .text .md-heading { font-weight: 700; margin: 8px 0 4px; }
+      .answer .text strong { font-weight: 700; color: #fff; }
+      .answer .text li { margin-bottom: 4px; }
       .answer .text ul, .answer .text ol { margin: 0 0 6px; padding-left: 20px; }
       .answer .text code { font-family: Consolas, monospace; background: rgba(255,255,255,.08); padding: 0 3px; border-radius: 3px; }
       .answer .text a { color: #1d9bd1; text-decoration: none; cursor: pointer; }
@@ -153,7 +155,7 @@
             const anchor = Object.assign(el("a", "", link[1]), { href: link[2] });
             anchor.addEventListener("click", (event) => (event.preventDefault(), send({ type: "open", url: link[2] })));
             parent.append(anchor);
-          } else if (/^\*\*[^*]+\*\*$/.test(piece)) parent.append(el("strong", "", piece.slice(2, -2)));
+          } else if (/^\*\*[^*]+\*\*$/.test(piece)) parent.append(inline(el("strong"), piece.slice(2, -2)));
           else if (/^`[^`]+`$/.test(piece)) parent.append(el("code", "", piece.slice(1, -1)));
           else if (piece) parent.append(piece);
         }
@@ -523,10 +525,10 @@
       }
     }, 2000);
 
-    // A question asked of you: someone else's last lines (up to three, within 15 s) say your first name, and the latest
-    // is a question; in a huddle of just the two of you, any question of theirs. It is answered once fully asked: when someone else starts talking, or when the speaker's lines have
+    // A question asked of you, only while Follow is on: someone else's last lines (up to three, within 15 s) say your
+    // first name, and the latest is a question; in a huddle of just the two of you, any question of theirs. It is answered once fully asked: when someone else starts talking, or when the speaker's lines have
     // stayed the same for 3 s (more lines from the speaker wait for them). The fast model answers it in the chosen
-    // session, and the pop-up shows it.
+    // session, and the pop-up shows it. With Follow off, nothing is sent; turning it off drops a question being heard.
     let me = null; // your first name, lower case (the main process sends it)
     const recent = []; // the latest captions, in order
     let waiting = null; // { name, lines, timer }: the question being asked now, and its lines so far
@@ -547,6 +549,7 @@
       const { name, lines } = waiting;
       clearTimeout(waiting.timer);
       waiting = null;
+      if (!following) return;
       const own = lines.filter((caption) => !answered.has(caption.id));
       if (!own.length) return;
       own.forEach((caption) => answered.add(caption.id));
@@ -557,7 +560,7 @@
     function heard(caption) {
       if (!recent.includes(caption)) recent.push(caption);
       if (recent.length > 40) recent.shift();
-      if (!me || !caption.name) return;
+      if (!me || !caption.name || !following) return;
       if (waiting && waiting.name !== caption.name) finish();
       if (firstName(caption.name) === me) return;
       const own = linesOf(caption.name);
@@ -611,8 +614,9 @@
       following = !following;
       followChip.classList.toggle("on", following);
       followChip.textContent = following ? "Following" : "Follow";
-      // From now on: what was said before isn't sent.
-      if (following) recent.forEach((caption) => followed.add(caption.id));
+      // From now on: what was said before isn't sent (nor answered as a question asked of you).
+      if (following) recent.forEach((caption) => (followed.add(caption.id), answered.add(caption.id)));
+      else if (waiting) (clearTimeout(waiting.timer), (waiting = null));
     });
     root.appendChild(followChip);
     setInterval(() => {
