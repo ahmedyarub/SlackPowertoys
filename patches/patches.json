@@ -84,7 +84,7 @@
    "path": "src/main.bundle.cjs/_bundle.json",
    "kind": "edit",
    "baseSha256": "5cafe9ab68e4d81fc8e73a89a19003f90a24486c38d4e5c3711d0887b45658e7",
-   "resultSha256": "9fd8cecefb58ce1a3bd24e0ae61df47f43a90a919922d2431545ca94b9d95a0d",
+   "resultSha256": "415c166ff6a523316cf3bd489aa9f4a403134b2f5e01a66e6e188d1c5cacfd7a",
    "hunks": [
     {
      "at": 6061,
@@ -209,6 +209,18 @@
       ],
       [
        "      \"file\": \"powertoys-tickets.js\"\n"
+      ],
+      [
+       "    },\n"
+      ],
+      [
+       "    {\n"
+      ],
+      [
+       "      \"id\": \"powertoys/talk\",\n"
+      ],
+      [
+       "      \"file\": \"powertoys-talk.js\"\n"
       ]
      ]
     }
@@ -247,7 +259,7 @@
   {
    "path": "src/main.bundle.cjs/powertoys-huddle.js",
    "kind": "add",
-   "sha256": "acabb405a15e2f5fa58ce77944a14112ef0947cf0e8ff32ac222f4769b03859a"
+   "sha256": "b6ace592273215373a51c35d6e8b078fafd37ec1d69199e124b0cf72e58a15a2"
   },
   {
    "path": "src/main.bundle.cjs/powertoys-main.js",
@@ -258,6 +270,11 @@
    "path": "src/main.bundle.cjs/powertoys-notion.js",
    "kind": "add",
    "sha256": "2e7acbb9e0153a08e22e63a174537b8bf81f8f2920ddbf017eed93dc16b6a8be"
+  },
+  {
+   "path": "src/main.bundle.cjs/powertoys-talk.js",
+   "kind": "add",
+   "sha256": "8527c93e09e5b031140bd6ef24bc76873c6d7eed6e548584b7277715b32379f5"
   },
   {
    "path": "src/main.bundle.cjs/powertoys-tickets.js",
@@ -424,7 +441,7 @@
   {
    "path": "src/preload.bundle.js/powertoys-page-slack.js",
    "kind": "add",
-   "sha256": "6484ea8ca434367c0e681928e0271f84099ebd61b141ff251b115df10f570935"
+   "sha256": "1d7fcdabb39e13b4a1c41291305579fb3c15042e055d05fed1a737daf22a8837"
   },
   {
    "path": "src/preload.bundle.js/powertoys-page.js",

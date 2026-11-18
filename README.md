@@ -14,16 +14,20 @@ patches/patches.json        the patch manifest: every file, its hashes and its e
 patches/files/...           files that are entirely new (written for Powertoys), copied in as they are
 ```
 
-`patches/patches.json` lists 18 files:
+`patches/patches.json` lists 27 files:
 
-- **13 new files** (`"kind": "add"`), written for Powertoys:
+- **21 new files** (`"kind": "add"`), written for Powertoys:
   - main process: `powertoys-main.js` (`"powertoys/main"`), `powertoys-claude.js` (Slack for Claude, the bridge),
     `powertoys-ai.js` (Claude through the Claude Code CLI), `powertoys-notion.js` (Notion API),
     `powertoys-dev.js` (GitHub through `gh`, editors, terminals, gists, repository search),
     `powertoys-assist.js` (the developer features), `powertoys-huddle.js` (huddles: captions, questions to Claude,
-    headphones), all in `src/main.bundle.cjs/`;
-  - Slack's page: `powertoys-page.js`, `powertoys-page-dev.js`, `powertoys-page-compose.js`,
-    `powertoys-page-panel.js`, in `src/preload.bundle.js/`;
+    recording, headphones), `powertoys-talk.js` (push to talk's shortcut), `powertoys-brief.js` (the huddle Brief),
+    `powertoys-tickets.js` (tickets next to messages), `powertoys-history.js` (edited and deleted messages), all in
+    `src/main.bundle.cjs/`;
+  - Slack's page: `powertoys-page.js`, `powertoys-page-slack.js` (Slack's own state: captions, the sidebar, push to
+    talk), `powertoys-page-call.js` (the call's sound for recordings), `powertoys-page-dev.js`,
+    `powertoys-page-compose.js`, `powertoys-page-panel.js`, `powertoys-page-history.js`, `powertoys-page-media.js`, in
+    `src/preload.bundle.js/`;
   - `mcp/slack-powertoys.mjs` (an MCP server for Claude Desktop) and `mcp/claude-code-hook.mjs` (a Claude Code hook),
     which run on their own with Node.
 - **6 edits** (`"kind": "edit"`) to the app's own files: three one-line hooks (start the two halves, add the tray
@@ -89,7 +93,10 @@ patches/files/...           files that are entirely new (written for Powertoys),
   has been fully asked; turning Follow off drops one still being heard. **Follow** (off until you click it) also sends the call's finished sentences to that conversation as it goes, and Claude speaks up only
   when something needs correcting or saying. Those checks run on Haiku; anything that needs a deep investigation goes
   to the same conversation on Opus; what it says shows in a pop-up you can drag. The Brief can be dragged too, and Slack can't be quit during a
-  huddle. While the call is recorded, the caption lines go with their time in the recording,
+  huddle. **Push to talk:** hold the **🎙 Hold to talk** chip in the huddle window, or hold **Ctrl+Shift** in any window,
+  and your microphone is on until you let go (then off again, if it was off). It uses Slack's own mute switch, and the
+  chip turns green only once Slack says the microphone is on; `"huddle": {"pushToTalk": "<keys>"}` picks other keys
+  (for example `F13` or `Mouse4`), `null` turns the shortcut off. While the call is recorded, the caption lines go with their time in the recording,
   so Claude can look at the screen at that moment. Ctrl+A in the captions selects only the captions. From the moment a huddle rings or its start screen opens, Bluetooth goes on and
   Windows connects your paired
   headphones (found by their Bluetooth class, whatever their name; `"huddle": {"headphones": "<name>"}` picks a

@@ -21,6 +21,8 @@
 // A message powertoys/page-compose held for its links' titles is sent here, by Slack's own send (or an edit's Save).
 // The channel sidebar is collapsed (Slack's own "Toggle sidebar visibility") until pinned, and shown over the
 // conversation when the pointer reaches the workspace's left edge; the pin replaces the sidebar's compose button.
+// Push to talk (the huddle window's "Hold to talk", or its shortcut, powertoys/talk): the huddle's microphone on while
+// held, with Slack's own "Enable or disable local microphone", and off again when let go if it was off.
 // ---------------------------------------------------------------------------------------------
 (function (module, exports, __webpack_require__) {
   "use strict";
@@ -44,7 +46,10 @@
       modals: ['"Sets a flag that will prevent the video recorder modal from being closed"', "modalsByTeamAndWindow"],
       // Not needed for the captions (looked for apart): the sidebar's own show/hide (what Ctrl+Shift+D does).
       sidebar: ['"Toggle sidebar visibility"', "createThunkToggleSidebar"],
+      // Not needed for the captions either: the huddle's microphone on or off (push to talk), loaded with the huddle's code.
+      microphone: ['"Enable or disable local microphone"', '"setSelfMicrophone"'],
     };
+    const OPTIONAL = ["sidebar", "microphone"];
     const ids = {};
     const scanned = new Set();
     const scan = () => {
@@ -61,7 +66,7 @@
     let found = null;
     function find() {
       scan();
-      if (Object.keys(WANTED).some((key) => key !== "sidebar" && !ids[key])) return null;
+      if (Object.keys(WANTED).some((key) => !OPTIONAL.includes(key) && !ids[key])) return null;
       // Loaded the way Slack loads them (already loaded: their exports as they are).
       const [stores, captions, tabs, client, modals] = ["stores", "captions", "tabs", "client", "modals"].map((key) => load(ids[key]));
       const parts = {
@@ -96,6 +101,7 @@
         let sideBySideAt = 0;
         let modalsAt = store.getState()?.modal?.lastUpdated;
         store.subscribe(() => {
+          if (store === talk.store) talkWatch();
           if (store.getState()?.modal?.lastUpdated !== modalsAt) {
             modalsAt = store.getState()?.modal?.lastUpdated;
             closeAiNotesNotice(store);
@@ -348,6 +354,66 @@
       say(`sidebar: ${ids.sidebar ? "Slack's show/hide found" : "Slack's show/hide wasn't found yet"}; ${pinned ? "pinned" : "shows over the conversation when you point at the left edge"}`);
     };
 
+    // --- Push to talk ------------------------------------------------------------------------------------------
+    // Held (the huddle window's "Hold to talk" chip, or the shortcut: "talk-down:<by>" / "talk-up:<by>"), the
+    // microphone goes on with Slack's own "Enable or disable local microphone" (setSelfMicrophone, what its mute
+    // button and Ctrl+Shift+Space run), in the store of the workspace whose huddle is on (the client store's
+    // clientHuddles.mostRecentHuddle, as Slack's getActiveHuddleReference reads it); let go (the chip and the key
+    // both), it goes off again only if it was off when the hold began. What Slack's state then says (peers.self) goes
+    // back to the chip: "powertoys:slack-talk".
+    const talk = { held: new Set(), turnedOn: false, setMicrophone: null, clientState: null, store: null };
+    const talkSay = (state) => document.dispatchEvent(new CustomEvent("powertoys:slack-talk", { detail: JSON.stringify(state) }));
+    const microphoneOn = (store) => store?.getState()?.peers?.self?.isMicrophoneEnabled === true;
+    function huddleStore() {
+      if (!ids.microphone) scan();
+      if (!talk.setMicrophone && ids.microphone) talk.setMicrophone = exported(load(ids.microphone), (value) => value.meta?.name === "setSelfMicrophone");
+      if (!talk.clientState && ids.client) talk.clientState = exported(load(ids.client), (value) => value.name === "getStateForClientStore");
+      if (!talk.setMicrophone || !talk.clientState) return { error: "Slack's microphone switch wasn't found" };
+      const huddle = talk.clientState()?.clientHuddles?.mostRecentHuddle;
+      if (!huddle?.teamId || ["NOT_STARTED", "PRE_JOINED"].includes(huddle.huddleState ?? "NOT_STARTED") || huddle.isPrejoin) return { error: "Not in a huddle" };
+      const map = found.storeMap();
+      const store = map instanceof Map ? map.get(huddle.teamId) : map?.[huddle.teamId];
+      return store ? { store } : { error: "The huddle's workspace wasn't found" };
+    }
+    const setMicrophone = (store, on, by) => store.dispatch(talk.setMicrophone({ isMicrophoneEnabled: on, source: by === "key" ? "KeyboardShortcut" : "ToolbarMuteButton" }));
+    document.addEventListener("powertoys:slack-command", (event) => {
+      const command = /^talk-(down|up):(button|key)$/.exec(String(event.detail));
+      if (!command) return;
+      const [, edge, by] = command;
+      try {
+        if (!found) return talkSay({ held: false, microphone: false, error: "Slack isn't ready yet", log: "Slack's modules aren't found yet" });
+        if (edge === "down") {
+          if (talk.held.has(by)) return;
+          const { store, error } = huddleStore();
+          if (error) return talkSay({ held: false, microphone: false, error, log: `${by} held: ${error}` });
+          talk.held.add(by);
+          if (talk.held.size === 1) {
+            talk.store = store;
+            talk.turnedOn = !microphoneOn(store);
+            if (talk.turnedOn) setMicrophone(store, true, by);
+            say(`push to talk: ${by} held; microphone ${talk.turnedOn ? "turned on" : "was already on"}`);
+          }
+        } else {
+          if (!talk.held.delete(by) || talk.held.size) return;
+          if (talk.turnedOn && talk.store) setMicrophone(talk.store, false, by);
+          say(`push to talk: ${by} let go; microphone ${talk.turnedOn ? "turned off" : "left on (it was on)"}`);
+          talk.turnedOn = false;
+        }
+        talkSay({ held: talk.held.size > 0, microphone: microphoneOn(talk.store) });
+      } catch (caught) {
+        talkSay({ held: false, microphone: false, error: "Couldn't switch the microphone", log: `${edge} (${by}): ${caught.message}` });
+      }
+    });
+    // The microphone as Slack's state has it, whenever it changes in the huddle's store (Slack switches it after the
+    // device answers, and its own mute button can switch it during a hold).
+    let talkMicrophone = null;
+    const talkWatch = () => {
+      const now = microphoneOn(talk.store);
+      if (now === talkMicrophone) return;
+      talkMicrophone = now;
+      talkSay({ held: talk.held.size > 0, microphone: now });
+    };
+
     // Slack's modules arrive as its code loads: looked for every 2 s for 3 minutes; the stores, then every 10 s.
     let tries = 0;
     const look = setInterval(() => {
@@ -372,6 +438,9 @@
   exports.hookSlack = function hookSlack() {
     document.addEventListener("powertoys:slack-log", (event) => electron.ipcRenderer.send("powertoys:log", String(event.detail)));
     electron.ipcRenderer.on("powertoys:huddle-started", () => document.dispatchEvent(new CustomEvent("powertoys:slack-command", { detail: "captions-on" })));
+    // Push to talk: held and let go (the huddle window's chip, or the shortcut), and the microphone as Slack then has it.
+    electron.ipcRenderer.on("powertoys:talk", (event, edge) => document.dispatchEvent(new CustomEvent("powertoys:slack-command", { detail: `talk-${edge}` })));
+    document.addEventListener("powertoys:slack-talk", (event) => electron.ipcRenderer.send("powertoys:talk-state", String(event.detail)));
     electron.webFrame.executeJavaScript(`(${slackHook.toString()})()`).catch((caught) => electron.ipcRenderer.send("powertoys:log", `captions: the page script failed: ${caught.message}`));
   };
 });

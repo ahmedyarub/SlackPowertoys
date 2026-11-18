@@ -21,7 +21,10 @@
 //     with a model for the turn), never `claude -p`;
 //   - "Ask" opens a box to type a question (it closes once sent); Follow's remarks show in a pop-up ("Conversation"
 //     shows it again); the Brief and that pop-up are dragged by their title bars; Ctrl+A after a click in the captions selects
-//     the caption lines only; Slack can't be quit during a huddle (powertoys/main holds it, with a dialog).
+//     the caption lines only; Slack can't be quit during a huddle (powertoys/main holds it, with a dialog);
+//   - push to talk: while "Hold to talk" (a chip) or the shortcut (powertoys/talk: "huddle": { "pushToTalk":
+//     "Ctrl+Shift" }, held in any window) is held, the microphone is on, and off again when let go if it was off
+//     (Slack's own switch, in Slack's page: powertoys/page-slack).
 // Each huddle is recorded to a file (the window, the call's sound, your microphone); when it ends, a notification says
 // it is ready and Slack asks what to do with it ("huddle": { "autoRecord": true, "recordingsFolder": "<folder>" }).
 // Transcripts are corrected with the workspace's ontology when one is chosen (claude.ontologies).
@@ -107,6 +110,9 @@
       .brief { bottom: 154px; }
       .follow { bottom: 180px; }
       .follow.on { background: #1d9bd1; color: #fff; }
+      .talk { bottom: 232px; user-select: none; touch-action: none; }
+      .talk.on { opacity: 1; color: #fff; background: #2eb67d; }
+      .talk.failed { opacity: 1; color: #1d1c1d; background: #ecb22e; }
       .asked { bottom: 206px; cursor: default; }
       .asked[hidden] { display: none; }
       .asked.failed { opacity: 1; color: #1d1c1d; background: #ecb22e; white-space: normal; }
@@ -601,6 +607,42 @@
     document.addEventListener("keydown", (event) => event.ctrlKey && event.shiftKey && event.code === "KeyM" && (event.preventDefault(), markNow()), true);
     root.appendChild(mark);
 
+    // "Hold to talk": the microphone is on while the chip (or the push-to-talk shortcut, anywhere) is held, and off
+    // again when let go if it was off before (Slack's own "Enable or disable local microphone", in Slack's page:
+    // powertoys/page-slack). The chip shows "Talking" only once Slack's state says the microphone is on.
+    const talkChip = el("button", "chip talk", "🎙 Hold to talk");
+    talkChip.tabIndex = -1;
+    let talkKey = null;
+    let talkHeld = false;
+    let talkNoteTimer = null;
+    const talkTitle = () => `Hold to talk: your microphone is on while this is held${talkKey ? ` (or while ${talkKey} is held, in any window)` : ""}`;
+    talkChip.title = talkTitle();
+    const showTalkState = ({ held, microphone, error }) => {
+      clearTimeout(talkNoteTimer);
+      const talking = held && microphone;
+      talkChip.classList.toggle("on", talking);
+      talkChip.classList.toggle("failed", !!error);
+      talkChip.textContent = error ? `🎙 ${error}` : talking ? "🎙 Talking" : "🎙 Hold to talk";
+      talkChip.title = error ?? talkTitle();
+      if (error) talkNoteTimer = setTimeout(() => showTalkState({ held: false, microphone: false }), 4000);
+    };
+    const talkUp = () => {
+      if (!talkHeld) return;
+      talkHeld = false;
+      send({ type: "talk", edge: "up" });
+    };
+    talkChip.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      talkChip.setPointerCapture(event.pointerId);
+      if (talkHeld) return;
+      talkHeld = true;
+      send({ type: "talk", edge: "down" });
+    });
+    for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) talkChip.addEventListener(type, talkUp);
+    window.addEventListener("blur", talkUp);
+    root.appendChild(talkChip);
+
     // "Follow" (off until clicked): the call's finished lines (a newer line has started, or it hasn't changed for 3 s) go
     // to the conversation every 20 s; Claude says something only when something needs correcting or saying, in the
     // pop-up. Clicking again stops it.
@@ -683,6 +725,11 @@
           mark.textContent = message.error ? `★ ${message.error}` : `★ Marked ${message.time}`;
           mark.classList.toggle("done", !message.error);
           setTimeout(() => ((mark.textContent = "★ Mark"), mark.classList.remove("done")), 2500);
+        } else if (message.type === "talk-key") {
+          talkKey = message.key ?? null;
+          talkChip.title = talkTitle();
+        } else if (message.type === "talk-state") {
+          showTalkState(message);
         } else if (message.type === "brief") {
           showBrief(message.error ? `Couldn't prepare the brief: ${message.error}` : message.markdown);
         } else if (message.type === "recording") {
@@ -802,6 +849,8 @@
       log(`huddle: questions go to "${chosen?.title ?? "a new session"}"`);
     } else if (message.type === "log") {
       log(`huddle window: ${String(message.text).slice(0, 300)}`);
+    } else if (message.type === "talk") {
+      pushToTalk(message.edge === "down" ? "down" : "up", "button");
     } else if (message.type === "open") {
       // A link in the brief: a ticket or PR (the browser), a Claude Code session (Claude Desktop); nothing else.
       if (/^(https|claude):\/\//.test(String(message.url))) electron.shell.openExternal(String(message.url));
@@ -1211,6 +1260,7 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
       stopRecording(contents, true).catch((caught) => warn(`recording: ${caught.message}`));
       // The huddle ended (or its ringing / start screen closed): Bluetooth off again if Powertoys turned it on. Any
       // other window (Powertoys' recorder, ...) has nothing to do with it.
+      if (wasHuddle && !huddles.size) __webpack_require__("powertoys/talk").stop();
       if (wasHuddle) bluetoothOffLater("ended", 3000);
       else if (wasRinging) ringWindowClosed();
     });
@@ -1232,6 +1282,19 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     log(`huddle window: maximized (it shows ${shown})`);
   }
 
+  // --- Push to talk -------------------------------------------------------------------------------------------
+  // Held: the chip in the huddle window ("button") or the shortcut ("key", powertoys/talk, in any window). Slack's page
+  // turns the microphone on and off (powertoys/page-slack) and says what Slack's state then is; that goes to the chip.
+  const pushToTalk = (edge, by) => slackPage()?.send("powertoys:talk", `${edge}:${by}`);
+  function watchTalkKeys() {
+    const talk = __webpack_require__("powertoys/talk");
+    const key = talk.shortcut() ?? talk.start(readSettings().huddle?.pushToTalk, (edge) => pushToTalk(edge, "key"));
+    for (const id of huddles.keys()) {
+      const each = electron.webContents.fromId(id);
+      if (each) reply(each, { type: "talk-key", key });
+    }
+  }
+
   async function addClaude(contents) {
     huddles.set(contents.id, { folder: currentFolder(), session: null, sessions: [], created: new Set() });
     keepBluetooth();
@@ -1241,6 +1304,11 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     headphonesOn("started").catch((caught) => warn(`headphones: ${caught.message}`));
     await contents.executeJavaScript(`(${huddleWindowScript.toString()})()`, true);
     log(`huddle window: Claude added (folder ${huddles.get(contents.id)?.folder ?? "none"})`);
+    try {
+      watchTalkKeys();
+    } catch (caught) {
+      warn(`push to talk: ${caught.message}`);
+    }
     // Your name, so the window can tell questions asked of you (huddle.autoAnswer: false turns that off).
     if (readSettings().huddle?.autoAnswer !== false) {
       (async () => {
@@ -2414,6 +2482,20 @@ if ($radio -and $radio.State -eq 'On') { Await ($radio.SetStateAsync('Off')) ([W
     electron.ipcMain.handle("powertoys:claude-sessions", (event, { teamId, base } = {}) => {
       const folder = readSettings().claude?.folders?.[teamId ?? (base ? recordingAt(base).teamId : null)] ?? null;
       return { folder, sessions: folder ? projectSessions(folder).map(({ id, title, updated }) => ({ id, title, updated })) : [] };
+    });
+    // Push to talk: what Slack's page says the microphone now is, to the chip in each huddle window.
+    electron.ipcMain.on("powertoys:talk-state", (event, detail) => {
+      let state;
+      try {
+        state = JSON.parse(detail);
+      } catch {
+        return;
+      }
+      if (state.log) log(`push to talk: ${String(state.log).slice(0, 300)}`);
+      for (const id of huddles.keys()) {
+        const each = electron.webContents.fromId(id);
+        if (each) reply(each, { type: "talk-state", held: !!state.held, microphone: !!state.microphone, error: state.error ?? null });
+      }
     });
     electron.ipcMain.on("powertoys:call-event", (event, detail) => {
       try {
