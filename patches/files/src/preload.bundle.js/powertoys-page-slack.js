@@ -152,7 +152,8 @@
     // "Got It" closes the notice and nothing else; so does this, wherever it is open.
     function closeAiNotesNotice(store) {
       for (const [key, modals] of Object.entries(found.openModals)) {
-        const kept = modals.filter((modal) => !(modal?.name === "SlackAIHuddleRecordingLegalModal" && !modal.element?.props?.isInitiator));
+        // Slack opens it under the name "huddle-recording-legal-modal" (its component is SlackAIHuddleRecordingLegalModal).
+        const kept = modals.filter((modal) => !(modal?.name === "huddle-recording-legal-modal" && !modal.element?.props?.isInitiator));
         if (kept.length === modals.length) continue;
         found.openModals[key] = kept;
         store.dispatch(found.modalsChanged());
