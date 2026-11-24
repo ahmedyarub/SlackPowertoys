@@ -15,9 +15,9 @@
 // in the store's dispatch, so the captions menu shows side-by-side only; turning the overlay on from the menu still
 // works; an overlay that comes on in the huddle's first 30 s otherwise is turned off (a store can keep side-by-side on from the
 // last huddle, and then nothing flips for the watcher to act on).
-// Slack's "Heads up — AI notes are on" notice, shown to who joins a huddle with AI notes on, is closed as its "Got It"
-// does: taken out of Slack's open modals (its modal store), and the store told. The notice the one who starts AI notes
-// gets ("Everyone ready to start AI notes?", Start or Cancel) stays.
+// Slack's AI notes notices never show: "Heads up — AI notes are on" (to who joins a huddle with AI notes on) is kept
+// out of Slack's open modals as it is opened, what its "Got It" does; "Everyone ready to start AI notes?" (to who
+// starts them) is kept out too and answered Start: the modal's own onConfirmRecord called, as its Start button does.
 // A message powertoys/page-compose held for its links' titles is sent here, by Slack's own send (or an edit's Save).
 // The channel sidebar is collapsed (Slack's own "Toggle sidebar visibility") until pinned, and shown over the
 // conversation when the pointer reaches the workspace's left edge; the pin replaces the sidebar's compose button.
@@ -75,9 +75,8 @@
         sideBySide: creator(captions, "Set enabled state for huddle captions side-by-side view"),
         selectTab: creator(tabs, "Set selected tab"),
         dispatchForClient: exported(client, (value) => value.name === "dispatchForClientStore"),
-        // The open modals, by workspace and window, and the action that tells the store they changed.
+        // The open modals, by workspace and window.
         openModals: Object.values(modals ?? {}).find((value) => value?.constructor === Object),
-        modalsChanged: creator(modals, "Open a modal"),
       };
       const missing = Object.keys(parts).filter((key) => !parts[key]);
       if (missing.length && !find.warned) say(`captions: Slack's modules found, but not ${missing.join(", ")} in them`);
@@ -99,13 +98,8 @@
         guardDispatch(store);
         let last = store.getState()?.huddleEvents ?? {};
         let sideBySideAt = 0;
-        let modalsAt = store.getState()?.modal?.lastUpdated;
         store.subscribe(() => {
           if (store === talk.store) talkWatch();
-          if (store.getState()?.modal?.lastUpdated !== modalsAt) {
-            modalsAt = store.getState()?.modal?.lastUpdated;
-            closeAiNotesNotice(store);
-          }
           const now = store.getState()?.huddleEvents;
           if (!now || now === last) return;
           const before = last;
@@ -149,16 +143,59 @@
       };
     }
 
-    // "Got It" closes the notice and nothing else; so does this, wherever it is open.
-    function closeAiNotesNotice(store) {
-      for (const [key, modals] of Object.entries(found.openModals)) {
-        // Slack opens it under the name "huddle-recording-legal-modal" (its component is SlackAIHuddleRecordingLegalModal).
-        const kept = modals.filter((modal) => !(modal?.name === "huddle-recording-legal-modal" && !modal.element?.props?.isInitiator));
-        if (kept.length === modals.length) continue;
-        found.openModals[key] = kept;
-        store.dispatch(found.modalsChanged());
-        say('huddle: the "AI notes are on" notice is closed, as its Got It would');
-      }
+    // Slack's AI notes notices never open. Both are opened under the name "huddle-recording-legal-modal" (component
+    // SlackAIHuddleRecordingLegalModal): the joiner's ("Heads up — AI notes … are on", Got It; opened by the huddle
+    // window's useMaybeOpenLegalRecordingModal) and the starter's ("Everyone ready to start AI notes?", Start).
+    // Every open modal is written into one object, by workspace and window (modalStore.modalsByTeamAndWindow,
+    // openModals here), whichever store opens it; the notice is kept out at that write, so it is never drawn: what
+    // "Got It" does (close it, nothing else). For the starter's, what "Start" (or "Always Start") does after closing it
+    // follows: the modal's own onConfirmRecord, with the language it would have preselected (the huddle's) and
+    // isEnablingAiNotesAutoStart. Existing keys become accessors; new keys reach the setter through a Proxy put in the
+    // object's prototype (an assignment to a key the object hasn't got goes to its prototype's set).
+    const LEGAL_MODAL = "huddle-recording-legal-modal";
+    function answerAiNotesNotice(notice) {
+      const props = notice.element?.props ?? {};
+      if (!props.isInitiator) return say('huddle: the "AI notes are on" notice is never shown (what its Got It does)');
+      const locale = allStores()
+        .flatMap((store) => Object.values(store?.getState?.()?.huddlesCanvas?.byHuddleId ?? {}))
+        .map((huddle) => huddle?.locale)
+        .find(Boolean);
+      // After Slack's openModal has finished (it is mid-write here).
+      setTimeout(() => {
+        try {
+          props.onConfirmRecord?.(locale, { isEnablingAiNotesAutoStart: props.isEnablingAiNotesAutoStart });
+          say(`huddle: "Everyone ready to start AI notes?" answered Start, as its button would, never shown (language ${locale ?? "Slack's default"}${props.isEnablingAiNotesAutoStart ? ", always for this channel" : ""})`);
+        } catch (caught) {
+          say(`huddle: starting AI notes as the Start button would failed: ${caught.message}`);
+        }
+      });
+    }
+    function guardModals() {
+      const modals = found.openModals;
+      const lists = new Map();
+      const keepOut = (list) => {
+        if (!Array.isArray(list)) return list;
+        const notices = list.filter((modal) => modal?.name === LEGAL_MODAL);
+        notices.forEach(answerAiNotesNotice);
+        return notices.length ? list.filter((modal) => !notices.includes(modal)) : list;
+      };
+      const guard = (key, list) => {
+        lists.set(key, keepOut(list));
+        Object.defineProperty(modals, key, {
+          configurable: true,
+          enumerable: true,
+          get: () => lists.get(key),
+          set: (value) => lists.set(key, keepOut(value)),
+        });
+      };
+      for (const [key, list] of Object.entries(modals)) guard(key, list);
+      Object.setPrototypeOf(
+        modals,
+        new Proxy(Object.getPrototypeOf(modals), {
+          set: (target, key, value, receiver) => (receiver === modals ? (guard(key, value), true) : Reflect.set(target, key, value, receiver)),
+        }),
+      );
+      say("huddle: AI notes notices are kept out of Slack's open modals");
     }
 
     // A huddle window showed: side-by-side captions on where they aren't, the overlay off where it is, and the
@@ -426,6 +463,7 @@
       if (found) {
         clearInterval(look);
         say("captions: Slack's caption, tab and modal actions found");
+        guardModals();
         watch();
         setInterval(watch, 10000);
         startSidebar();

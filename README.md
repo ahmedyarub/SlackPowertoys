@@ -83,8 +83,9 @@ patches/files/...           files that are entirely new (written for Powertoys),
   (what "Generate transcript" does), so it is there when you need it (`"claude": {"autoTranscripts": false}` turns
   it off).
 - **Huddles:** the huddle window opens maximized, from the screen before joining, with captions side by side instead
-  of the huddle's thread (side by side only: the closed-caption overlay is turned off). Slack's "Heads up — AI notes
-  are on" notice is closed for you, as its **Got It** would. A
+  of the huddle's thread (side by side only: the closed-caption overlay is turned off). Slack's AI notes notices never
+  show: "Heads up — AI notes are on" is kept closed, as its **Got It** would, and "Everyone ready to start AI notes?"
+  is answered **Start** for you. A
   "Claude session" dropdown in the captions panel picks one of your Claude Code sessions in the workspace's folder,
   or a new one (the default). Double-click a caption, select several and press **Ask Claude**, or right-click: the
   question goes into that conversation in Claude Desktop, where you read the answer: the huddle window only shows a
